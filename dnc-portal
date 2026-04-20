@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MCC | DNC Litigator Portal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+
+    <!-- ✅ Firebase compat SDK — works in plain HTML, no npm needed -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; }
+
+        .is-litigator {
+            background-color: #fee2e2 !important;
+            border-color: #ef4444 !important;
+            color: #991b1b !important;
+        }
+        .is-clean {
+            background-color: #f0fdf4 !important;
+            border-color: #22c55e !important;
+            color: #166534 !important;
+        }
+        .fade-in { animation: fadeIn 0.4s ease; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .pulse-live { animation: pulse 2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+        /* Status box always visible when result is set */
+        #statusBox { display: none; }
+        #statusBox.show { display: flex !important; }
+
+        /* Connection banner */
+        #connBanner {
+            position: fixed; bottom: 16px; right: 16px;
+            padding: 10px 18px; border-radius: 12px;
+            font-size: 12px; font-weight: 700;
+            z-index: 9999; transition: all 0.4s;
+        }
+        #connBanner.ok  { background:#dcfce7; color:#166534; border:1px solid #22c55e; }
+        #connBanner.err { background:#fee2e2; color:#991b1b; border:1px solid #ef4444; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen">
+
+<!-- Connection status banner (bottom-right) -->
+<div id="connBanner" class="ok">⏳ Connecting to Firebase...</div>
+
+<!-- ═══════════════ LOGIN ═══════════════ -->
+<div id="loginSection" class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-10 rounded-3xl shadow-2xl w-full max-w-md border border-slate-100 text-center fade-in">
+        <img src="logo.png" alt="MCC Logo" class="h-20 mx-auto mb-6"
+             onerror="this.style.display='none'">
+        <h1 class="text-2xl font-bold text-slate-800 mb-2">Internal Portal</h1>
+        <p class="text-slate-500 mb-8 text-sm">Authorized Personnel Only</p>
+
+        <input type="text" id="user" placeholder="Username"
+            class="w-full p-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none transition-all">
+        <input type="password" id="pass" placeholder="Password"
+            class="w-full p-4 mb-6 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-pink-500 outline-none transition-all">
+
+        <button onclick="handleLogin()"
+            class="w-full bg-slate-900 hover:bg-pink-600 text-white font-bold p-4 rounded-xl transition-all shadow-lg active:scale-95">
+            ACCESS SYSTEM
+        </button>
+        <p id="loginError" class="text-red-500 text-sm mt-4 hidden">
+            ❌ Invalid credentials. Try again.
+        </p>
+    </div>
+</div>
+
+<!-- ═══════════════ MAIN APP ═══════════════ -->
+<div id="mainApp" class="hidden fade-in">
+
+    <!-- Navbar -->
+    <nav class="bg-white border-b border-slate-200 p-4 sticky top-0 z-50 shadow-sm">
+        <div class="max-w-4xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <img src="logo.png" alt="MCC" class="h-9" onerror="this.style.display='none'">
+                <span class="font-black text-slate-800 text-sm uppercase tracking-widest">DNC Portal</span>
+            </div>
+            <div class="flex items-center gap-3">
+                <span id="userBadge"
+                    class="text-[10px] font-black bg-slate-100 px-3 py-1 rounded-full text-slate-500 tracking-widest uppercase">
+                </span>
+                <button onclick="location.reload()"
+                    class="text-slate-400 hover:text-pink-600 transition-colors text-sm font-bold">
+                    <i class="fas fa-power-off"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="max-w-4xl mx-auto p-5 space-y-6">
+
+        <!-- ── SEARCH CARD ── -->
+        <div class="bg-white rounded-3xl shadow-sm border border-slate-200 p-8 text-center">
+            <h2 class="text-lg font-black text-slate-800 mb-2 uppercase tracking-tight">
+                Name Verification Scrub
+            </h2>
+            <p class="text-slate-400 text-xs mb-6">Type a name — result appears instantly</p>
+
+            <div class="max-w-lg mx-auto">
+                <input
+                    type="text"
+                    id="searchBox"
+                    oninput="onSearchInput()"
+                    placeholder="Type or paste full name..."
+                    autocomplete="off"
+                    class="w-full p-5 text-xl border-2 border-slate-200 rounded-2xl
+                           focus:border-pink-500 outline-none transition-all
+                           text-center font-bold bg-slate-50 text-slate-700"
+                >
+            </div>
+
+            <!-- ── RESULT BOX — always in DOM, toggled by JS ── -->
+            <div id="statusBox"
+                class="mt-6 p-10 rounded-2xl border-4 flex-col items-center justify-center">
+                <i id="statusIcon" class="text-7xl mb-5"></i>
+                <h3 id="statusTitle" class="text-4xl font-black uppercase tracking-tighter"></h3>
+                <p  id="statusDesc"  class="text-lg font-semibold mt-3 opacity-80"></p>
+            </div>
+
+            <!-- Searching spinner -->
+            <div id="searchingSpinner" class="hidden mt-6 text-slate-400 text-sm font-bold animate-pulse">
+                🔍 Searching database...
+            </div>
+        </div>
+
+        <!-- ── ADMIN CONTROLS ── -->
+        <div id="adminControls" class="hidden space-y-5">
+
+            <!-- Stats row -->
+            <div class="grid grid-cols-2 gap-4">
+                <div class="bg-slate-900 p-6 rounded-2xl text-white flex justify-between items-center">
+                    <div>
+                        <p class="text-slate-400 text-[10px] uppercase font-bold tracking-widest mb-1">
+                            DNC Records
+                        </p>
+                        <h4 id="totalCountDisplay" class="text-4xl font-black leading-none">...</h4>
+                    </div>
+                    <i class="fas fa-database text-blue-400 text-2xl opacity-60"></i>
+                </div>
+                <div class="bg-slate-900 p-6 rounded-2xl text-white flex justify-between items-center">
+                    <div>
+                        <p class="text-slate-400 text-[10px] uppercase font-bold tracking-widest mb-1">
+                            Firebase Status
+                        </p>
+                        <h4 id="fbStatus"
+                            class="text-sm font-bold text-green-400 flex items-center gap-2 uppercase tracking-widest">
+                            <span class="h-2 w-2 rounded-full bg-green-400 pulse-live"></span>
+                            Syncing Live
+                        </h4>
+                    </div>
+                    <i class="fas fa-bolt text-yellow-400 text-2xl opacity-60"></i>
+                </div>
+            </div>
+
+            <!-- Activity log -->
+            <div class="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
+                <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                    <h5 class="text-slate-700 font-black text-xs uppercase tracking-widest">
+                        Recent Search Activity
+                    </h5>
+                    <span class="text-pink-500 text-[10px] font-bold uppercase tracking-tight">
+                        Real-Time
+                    </span>
+                </div>
+                <div id="historyLogs" class="min-h-[200px]">
+                    <p class="text-slate-400 text-center py-10 text-sm">
+                        Waiting for searches...
+                    </p>
+                </div>
+            </div>
+
+            <!-- Bulk upload -->
+            <div class="bg-slate-900 rounded-3xl p-8 text-white">
+                <h3 class="font-bold text-slate-400 text-xs uppercase tracking-widest mb-1">
+                    Update Master List
+                </h3>
+                <p class="text-slate-500 text-xs mb-4">One name per line</p>
+                <textarea id="bulkData"
+                    placeholder="John Smith&#10;Jane Doe&#10;Bob Johnson..."
+                    class="w-full h-36 bg-slate-800 rounded-2xl p-4 text-pink-100
+                           font-mono text-sm mb-4 outline-none resize-none
+                           focus:ring-1 focus:ring-pink-500 border-none">
+                </textarea>
+                <div class="flex gap-3">
+                    <button onclick="uploadToCloud()"
+                        class="flex-1 bg-pink-600 hover:bg-pink-500 p-4 rounded-xl
+                               font-bold transition-all">
+                        SYNC TO CLOUD
+                    </button>
+                    <button onclick="wipeCloud()"
+                        class="bg-slate-700 hover:bg-red-600 px-6 rounded-xl transition-colors"
+                        title="Wipe entire database">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+
+        </div><!-- /adminControls -->
+    </div>
+</div><!-- /mainApp -->
+
+<script>
+// ════════════════════════════════════════════════════════════════
+//  1. FIREBASE INIT — compat SDK (no import/npm needed)
+// ════════════════════════════════════════════════════════════════
+const firebaseConfig = {
+    apiKey:            "AIzaSyCrkQ9LMgcacvhOI7T0MJtQHpdk1FvVKpU",
+    authDomain:        "mcc-dnc-portal.firebaseapp.com",
+    projectId:         "mcc-dnc-portal",
+    storageBucket:     "mcc-dnc-portal.firebasestorage.app",
+    messagingSenderId: "764875551443",
+    appId:             "1:764875551443:web:ab09c911ecb8beefc7da26",
+    measurementId:     "G-CJELLK3F7Y"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// ── Test Firebase connection on load ──
+db.collection('_meta').doc('stats').get()
+    .then(() => {
+        setBanner('✅ Firebase Connected', 'ok');
+        setTimeout(() => {
+            document.getElementById('connBanner').style.display = 'none';
+        }, 3000);
+    })
+    .catch(err => {
+        setBanner('❌ Firebase Error: ' + err.code, 'err');
+        console.error('Firebase connection error:', err);
+    });
+
+function setBanner(msg, type) {
+    const b = document.getElementById('connBanner');
+    b.textContent = msg;
+    b.className = type === 'ok'
+        ? 'ok'  + ' fixed bottom-4 right-4 px-4 py-2 rounded-xl text-xs font-bold z-50 border'
+        : 'err' + ' fixed bottom-4 right-4 px-4 py-2 rounded-xl text-xs font-bold z-50 border';
+    b.style.cssText = type === 'ok'
+        ? 'position:fixed;bottom:16px;right:16px;padding:10px 18px;border-radius:12px;font-size:12px;font-weight:700;z-index:9999;background:#dcfce7;color:#166534;border:1px solid #22c55e;'
+        : 'position:fixed;bottom:16px;right:16px;padding:10px 18px;border-radius:12px;font-size:12px;font-weight:700;z-index:9999;background:#fee2e2;color:#991b1b;border:1px solid #ef4444;';
+    b.textContent = msg;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  2. CREDENTIALS
+// ════════════════════════════════════════════════════════════════
+const CREDENTIALS = {
+    admin: { password: "admin123", role: "ADMIN", isAdmin: true  },
+    staff: { password: "staff123", role: "STAFF", isAdmin: false }
+};
+
+let currentUser        = null;
+let historyUnsubscribe = null;
+
+// ════════════════════════════════════════════════════════════════
+//  3. AUTH
+// ════════════════════════════════════════════════════════════════
+function handleLogin() {
+    const user = document.getElementById('user').value.trim().toLowerCase();
+    const pass = document.getElementById('pass').value;
+    const cred = CREDENTIALS[user];
+
+    if (cred && cred.password === pass) {
+        currentUser = user;
+        document.getElementById('loginError').classList.add('hidden');
+        showPage(cred.isAdmin, cred.role);
+    } else {
+        document.getElementById('loginError').classList.remove('hidden');
+    }
+}
+
+document.getElementById('pass').addEventListener('keydown', e => {
+    if (e.key === 'Enter') handleLogin();
+});
+
+function showPage(isAdmin, role) {
+    document.getElementById('loginSection').classList.add('hidden');
+    document.getElementById('mainApp').classList.remove('hidden');
+    document.getElementById('userBadge').innerText = role;
+
+    if (isAdmin) {
+        document.getElementById('adminControls').classList.remove('hidden');
+        loadTotalCount();
+        startRealtimeHistory();
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  4. SEARCH — debounced 400ms
+// ════════════════════════════════════════════════════════════════
+let searchTimer = null;
+
+function onSearchInput() {
+    clearTimeout(searchTimer);
+
+    const val = document.getElementById('searchBox').value.trim();
+    const box = document.getElementById('statusBox');
+
+    // Hide result if input cleared
+    if (val.length < 2) {
+        box.classList.remove('show');
+        box.style.display = 'none';
+        document.getElementById('searchingSpinner').classList.add('hidden');
+        return;
+    }
+
+    // Show spinner while waiting
+    document.getElementById('searchingSpinner').classList.remove('hidden');
+    searchTimer = setTimeout(searchDatabase, 400);
+}
+
+async function searchDatabase() {
+    const raw   = document.getElementById('searchBox').value;
+    const clean = raw.replace(/[\/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
+
+    document.getElementById('searchingSpinner').classList.add('hidden');
+
+    if (clean.length < 2) return;
+
+    const box = document.getElementById('statusBox');
+
+    try {
+        const snap    = await db.collection('dnc_names')
+            .where('name_lower', '==', clean)
+            .limit(1)
+            .get();
+        const isMatch = !snap.empty;
+
+        // Show result box
+        box.style.display = 'flex';
+        box.classList.add('show');
+
+        if (isMatch) {
+            // 🔴 LITIGATOR MATCH
+            box.className         = 'show mt-6 p-10 rounded-2xl border-4 flex flex-col items-center justify-center is-litigator';
+            box.style.display     = 'flex';
+            document.getElementById('statusIcon').className  = 'fas fa-skull-crossbones text-7xl mb-5';
+            document.getElementById('statusTitle').innerText = 'LITIGATOR MATCH';
+            document.getElementById('statusDesc').innerText  = `⚠️ DNC Warning — "${clean.toUpperCase()}" is on the list`;
+        } else {
+            // 🟢 CLEAN
+            box.className         = 'show mt-6 p-10 rounded-2xl border-4 flex flex-col items-center justify-center is-clean';
+            box.style.display     = 'flex';
+            document.getElementById('statusIcon').className  = 'fas fa-check-circle text-7xl mb-5';
+            document.getElementById('statusTitle').innerText = 'CLEAN';
+            document.getElementById('statusDesc').innerText  = `✅ No match found for "${clean.toUpperCase()}"`;
+        }
+
+        // Log to Firestore search history (fire-and-forget)
+        db.collection('search_history').add({
+            searched_name: clean,
+            was_match:     isMatch,
+            staff_member:  currentUser || 'unknown',
+            created_at:    firebase.firestore.FieldValue.serverTimestamp()
+        }).catch(e => console.warn('Log error:', e));
+
+    } catch (err) {
+        console.error('Search error:', err);
+        box.style.display = 'flex';
+        box.className     = 'show mt-6 p-10 rounded-2xl border-4 flex flex-col items-center justify-center';
+        box.style.background = '#fef3c7';
+        box.style.borderColor = '#f59e0b';
+        document.getElementById('statusIcon').className  = 'fas fa-exclamation-triangle text-7xl mb-5 text-yellow-500';
+        document.getElementById('statusTitle').innerText = 'CONNECTION ERROR';
+        document.getElementById('statusDesc').innerText  = err.message || 'Check Firebase setup';
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  5. ADMIN — TOTAL COUNT
+// ════════════════════════════════════════════════════════════════
+async function loadTotalCount() {
+    try {
+        const snap  = await db.collection('_meta').doc('stats').get();
+        const count = snap.exists ? (snap.data().dnc_count || 0) : 0;
+        document.getElementById('totalCountDisplay').innerText = count.toLocaleString();
+    } catch (err) {
+        document.getElementById('totalCountDisplay').innerText = 'ERR';
+        console.error('Count error:', err);
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  6. ADMIN — REALTIME HISTORY
+// ════════════════════════════════════════════════════════════════
+function startRealtimeHistory() {
+    if (historyUnsubscribe) historyUnsubscribe();
+
+    historyUnsubscribe = db.collection('search_history')
+        .orderBy('created_at', 'desc')
+        .limit(10)
+        .onSnapshot(snapshot => {
+            const box = document.getElementById('historyLogs');
+            if (snapshot.empty) {
+                box.innerHTML = '<p class="text-slate-400 text-center py-10 text-sm">No searches yet...</p>';
+                return;
+            }
+            let html = '';
+            snapshot.forEach(doc => {
+                const log   = doc.data();
+                const ts    = log.created_at ? log.created_at.toDate() : new Date();
+                const time  = ts.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+                const color = log.was_match
+                    ? 'text-red-600 bg-red-50 border border-red-200'
+                    : 'text-green-700 bg-green-50 border border-green-200';
+                const label = log.was_match ? 'MATCH' : 'CLEAN';
+                html += `
+                <div class="flex justify-between items-center border-b border-slate-100
+                            py-3 px-5 hover:bg-slate-50 transition-all">
+                    <div>
+                        <p class="text-[10px] text-slate-400 font-mono">${time}</p>
+                        <p class="font-bold text-slate-800 text-sm mt-0.5">${log.searched_name.toUpperCase()}</p>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span class="text-[10px] text-slate-400 font-bold uppercase">
+                            ${log.staff_member || 'user'}
+                        </span>
+                        <span class="px-2 py-1 rounded-md text-[10px] font-black ${color}">
+                            ${label}
+                        </span>
+                    </div>
+                </div>`;
+            });
+            box.innerHTML = html;
+        }, err => {
+            console.error('History error:', err);
+        });
+}
+
+// ════════════════════════════════════════════════════════════════
+//  7. UPLOAD NAMES
+// ════════════════════════════════════════════════════════════════
+async function uploadToCloud() {
+    const raw   = document.getElementById('bulkData').value;
+    const names = raw.split('\n')
+        .map(n => n.replace(/[\/\-_@]/g, "").replace(/\s+/g, ' ').trim())
+        .filter(n => n.length > 1);
+
+    if (names.length === 0) {
+        alert('No valid names found. Enter one name per line.');
+        return;
+    }
+
+    const btn = document.querySelector('button[onclick="uploadToCloud()"]');
+    btn.textContent = 'UPLOADING...';
+    btn.disabled = true;
+
+    try {
+        const batchSize = 499;
+        let   added     = 0;
+
+        for (let i = 0; i < names.length; i += batchSize) {
+            const chunk = names.slice(i, i + batchSize);
+            const batch = db.batch();
+
+            chunk.forEach(name => {
+                const ref = db.collection('dnc_names').doc();
+                batch.set(ref, {
+                    name:       name,
+                    name_lower: name.toLowerCase(),
+                    added_at:   firebase.firestore.FieldValue.serverTimestamp()
+                });
+            });
+
+            // Update counter
+            batch.set(
+                db.collection('_meta').doc('stats'),
+                { dnc_count: firebase.firestore.FieldValue.increment(chunk.length) },
+                { merge: true }
+            );
+
+            await batch.commit();
+            added += chunk.length;
+        }
+
+        alert(`✅ Successfully synced ${added} name${added > 1 ? 's' : ''}!`);
+        document.getElementById('bulkData').value = '';
+        loadTotalCount();
+
+    } catch (err) {
+        console.error('Upload error:', err);
+        alert('❌ Upload failed: ' + err.message);
+    } finally {
+        btn.textContent = 'SYNC TO CLOUD';
+        btn.disabled = false;
+    }
+}
+
+// ════════════════════════════════════════════════════════════════
+//  8. WIPE DATABASE
+// ════════════════════════════════════════════════════════════════
+async function wipeCloud() {
+    if (!confirm('⚠️ Wipe ENTIRE DNC database? This cannot be undone.')) return;
+
+    try {
+        let deleted = 0;
+        while (true) {
+            const snap = await db.collection('dnc_names').limit(499).get();
+            if (snap.empty) break;
+            const batch = db.batch();
+            snap.forEach(doc => batch.delete(doc.ref));
+            batch.set(
+                db.collection('_meta').doc('stats'),
+                { dnc_count: 0 },
+                { merge: true }
+            );
+            await batch.commit();
+            deleted += snap.size;
+        }
+        alert(`✅ Database cleared — ${deleted} records removed.`);
+        loadTotalCount();
+    } catch (err) {
+        console.error('Wipe error:', err);
+        alert('❌ Wipe failed: ' + err.message);
+    }
+}
+</script>
+</body>
+</html>
