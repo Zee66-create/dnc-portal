@@ -8,21 +8,13 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
     <style>
-        /* Smooth Entry Animations */
         @keyframes popIn {
-            0% { transform: scale(0.9); opacity: 0; }
-            70% { transform: scale(1.05); opacity: 1; }
+            0% { transform: scale(0.95); opacity: 0; }
             100% { transform: scale(1); opacity: 1; }
         }
-        .animate-pop { animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-        
+        .animate-pop { animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
         .pulse-soft { animation: pulse 2s infinite; }
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
-
-        /* Custom Scrollbar for a cleaner look */
-        ::-webkit-scrollbar { width: 6px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
     </style>
 
     <script type="module">
@@ -60,63 +52,62 @@
             }
         }
 
-        // --- FLUID SEARCH LOGIC ---
+        // --- SPLIT SEARCH LOGIC ---
         let typingTimer;
         window.searchDatabase = () => {
-            const raw = document.getElementById('searchBox').value;
-            const box = document.getElementById('statusBox');
-            
             clearTimeout(typingTimer);
-            
-            // Clean logic
-            const clean = raw.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
-
-            if(clean.length < 2) { 
-                box.classList.add('hidden'); 
-                return; 
-            }
-
             typingTimer = setTimeout(async () => {
-                const q = query(collection(db, "dnc_names"), where("name_clean", "==", clean), limit(1));
-                const snap = await getDocs(q);
-                const isMatch = !snap.empty;
+                const fRaw = document.getElementById('firstName').value.trim().toLowerCase();
+                const lRaw = document.getElementById('lastName').value.trim().toLowerCase();
+                const box = document.getElementById('statusBox');
 
-                // Log search
+                if (fRaw.length < 2 && lRaw.length < 2) {
+                    box.classList.add('hidden');
+                    return;
+                }
+
+                // Search logic: Check if either exists
+                const qF = query(collection(db, "dnc_names"), where("name_clean", "==", fRaw), limit(1));
+                const qL = query(collection(db, "dnc_names"), where("name_clean", "==", lRaw), limit(1));
+                
+                const [snapF, snapL] = await Promise.all([getDocs(qF), getDocs(qL)]);
+                const isMatch = !snapF.empty || !snapL.empty;
+
+                // Log the interaction
                 await addDoc(collection(db, "search_history"), {
-                    searched_name: clean,
+                    searched_name: `${fRaw} ${lRaw}`.trim(),
                     was_match: isMatch,
-                    staff_member: document.getElementById('userBadge').innerText || "User",
+                    staff_member: document.getElementById('userBadge').innerText,
                     timestamp: new Date()
                 });
 
-                // Trigger Instant Visual Warning
-                box.classList.remove('hidden', 'animate-pop');
-                void box.offsetWidth; // Force CSS reflow for animation restart
-                box.classList.add('animate-pop');
+                // Update UI
+                box.classList.remove('hidden');
+                void box.offsetWidth; 
 
                 if(isMatch) {
-                    box.className = "mt-8 p-12 rounded-[50px] border-[6px] bg-red-50 border-red-500 text-red-900 shadow-2xl transition-all animate-pop block";
-                    document.getElementById('statusTitle').innerText = "LITIGATOR MATCH";
-                    document.getElementById('statusIcon').className = "fas fa-skull-crossbones text-7xl mb-4 text-red-600";
+                    box.className = "mt-10 p-12 rounded-[50px] border-[8px] bg-red-50 border-red-500 text-red-900 shadow-2xl animate-pop block";
+                    document.getElementById('statusTitle').innerText = "LITIGATOR FOUND";
+                    document.getElementById('statusIcon').className = "fas fa-exclamation-triangle text-7xl mb-4 text-red-600";
                 } else {
-                    box.className = "mt-8 p-12 rounded-[50px] border-[6px] bg-green-50 border-green-500 text-green-900 shadow-2xl transition-all animate-pop block";
-                    document.getElementById('statusTitle').innerText = "CLEAN";
-                    document.getElementById('statusIcon').className = "fas fa-check-circle text-7xl mb-4 text-green-600";
+                    box.className = "mt-10 p-12 rounded-[50px] border-[8px] bg-green-50 border-green-500 text-green-900 shadow-2xl animate-pop block";
+                    document.getElementById('statusTitle').innerText = "CLEAN / NO MATCH";
+                    document.getElementById('statusIcon').className = "fas fa-check-double text-7xl mb-4 text-green-600";
                 }
-            }, 350); 
+            }, 400);
         };
 
         function initAdminSystem() {
             onSnapshot(collection(db, "dnc_names"), s => document.getElementById('countDisplay').innerText = s.size.toLocaleString());
-            const qH = query(collection(db, "search_history"), orderBy("timestamp", "desc"), limit(10));
+            const qH = query(collection(db, "search_history"), orderBy("timestamp", "desc"), limit(8));
             onSnapshot(qH, s => {
                 let h = '';
                 s.forEach(d => {
                     const data = d.data();
-                    const color = data.was_match ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50';
-                    h += `<div class="flex justify-between items-center p-4 border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                            <span class="font-bold text-slate-700">${data.searched_name.toUpperCase()}</span>
-                            <span class="px-4 py-1 rounded-full text-[10px] font-black ${color}">${data.was_match ? 'MATCH' : 'CLEAN'}</span>
+                    const color = data.was_match ? 'text-red-500' : 'text-green-600';
+                    h += `<div class="flex justify-between p-4 border-b border-slate-50">
+                            <span class="font-bold">${data.searched_name.toUpperCase()}</span>
+                            <span class="font-black ${color}">${data.was_match ? 'MATCH' : 'OK'}</span>
                           </div>`;
                 });
                 document.getElementById('historyLogs').innerHTML = h;
@@ -126,68 +117,80 @@
         window.uploadToCloud = async () => {
             const raw = document.getElementById('bulkInput').value;
             const names = raw.split('\n').filter(n => n.trim().length > 1);
-            if(!names.length) return;
             const batch = writeBatch(db);
             names.forEach(n => {
                 const clean = n.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
                 batch.set(doc(collection(db, "dnc_names")), { name: n, name_clean: clean });
             });
             await batch.commit();
-            alert("Updated Cloud Database!");
+            alert("Database Synced!");
             document.getElementById('bulkInput').value = "";
         };
     </script>
 </head>
-<body class="bg-[#f1f5f9] min-h-screen text-slate-900">
+<body class="bg-slate-100 min-h-screen">
 
-    <div id="loginSection" class="flex items-center justify-center min-h-screen p-6">
-        <div class="bg-white p-12 rounded-[60px] shadow-2xl w-full max-w-md text-center border-b-[10px] border-slate-900">
+    <div id="loginSection" class="flex items-center justify-center min-h-screen">
+        <div class="bg-white p-12 rounded-[60px] shadow-2xl w-full max-w-sm text-center">
             <img src="logo.png" class="h-20 mx-auto mb-8">
-            <input type="text" id="user" placeholder="User" class="w-full p-5 mb-4 bg-slate-100 rounded-2xl outline-none font-bold">
-            <input type="password" id="pass" placeholder="Password" class="w-full p-5 mb-8 bg-slate-100 rounded-2xl outline-none font-bold">
-            <button onclick="handleLogin()" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black text-xl hover:bg-blue-600 transition-all">START SESSION</button>
+            <input type="text" id="user" placeholder="Username" class="w-full p-5 mb-4 bg-slate-50 rounded-2xl outline-none font-bold border focus:border-blue-400 transition-all">
+            <input type="password" id="pass" placeholder="Password" class="w-full p-5 mb-8 bg-slate-50 rounded-2xl outline-none font-bold border focus:border-blue-400 transition-all">
+            <button onclick="handleLogin()" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black text-xl hover:bg-blue-600">LOGIN</button>
         </div>
     </div>
 
     <div id="mainApp" class="hidden">
-        <nav class="bg-white p-6 border-b flex justify-between items-center sticky top-0 z-50 shadow-sm">
+        <nav class="bg-white p-6 border-b flex justify-between items-center sticky top-0 z-50">
             <img src="logo.png" class="h-10">
-            <span id="userBadge" class="bg-slate-900 text-white px-5 py-2 rounded-full text-[11px] font-black uppercase tracking-widest"></span>
+            <span id="userBadge" class="bg-slate-900 text-white px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest"></span>
         </nav>
 
         <div class="max-w-4xl mx-auto p-10">
-            <div class="bg-white p-16 rounded-[70px] shadow-sm border border-slate-200 text-center relative overflow-hidden">
-                <h2 class="text-xs font-black text-slate-400 mb-8 uppercase tracking-[0.5em]">Global Database Check</h2>
-                <input type="text" id="searchBox" onkeyup="searchDatabase()" placeholder="Type Full Name..." 
-                    class="w-full p-8 text-4xl border-0 rounded-3xl text-center font-black bg-slate-50 focus:ring-4 focus:ring-blue-100 outline-none transition-all placeholder:text-slate-200">
+            <div class="bg-white p-16 rounded-[80px] shadow-sm border border-slate-200 text-center">
+                <h2 class="text-[10px] font-black text-slate-400 mb-10 uppercase tracking-[0.6em]">Advanced Search Filter</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-10">
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase">First Name</label>
+                        <input type="text" id="firstName" onkeyup="searchDatabase()" placeholder="First..." 
+                            class="w-full p-6 text-2xl border-4 border-slate-50 rounded-3xl text-center font-bold bg-slate-50 focus:border-blue-500 focus:bg-white outline-none transition-all">
+                    </div>
+                    <div class="space-y-2">
+                        <label class="text-[10px] font-bold text-slate-400 uppercase">Last Name</label>
+                        <input type="text" id="lastName" onkeyup="searchDatabase()" placeholder="Last..." 
+                            class="w-full p-6 text-2xl border-4 border-slate-50 rounded-3xl text-center font-bold bg-slate-50 focus:border-blue-500 focus:bg-white outline-none transition-all">
+                    </div>
+                </div>
                 
                 <div id="statusBox" class="hidden">
                     <i id="statusIcon"></i>
                     <h3 id="statusTitle" class="text-5xl font-black italic tracking-tighter"></h3>
+                    <p class="mt-4 text-xs font-bold uppercase opacity-60">Verified against Cloud Master List</p>
                 </div>
             </div>
 
             <div id="adminControls" class="hidden mt-12 space-y-10">
-                <div class="grid grid-cols-2 gap-8">
-                    <div class="bg-slate-900 p-10 rounded-[50px] text-white shadow-2xl">
-                        <p class="text-slate-500 text-[10px] font-black uppercase">Cloud Records</p>
+                <div class="bg-slate-900 p-12 rounded-[60px] text-white flex justify-between items-center shadow-2xl">
+                    <div>
+                        <p class="text-slate-500 text-[10px] font-black uppercase">Database Total</p>
                         <h4 id="countDisplay" class="text-6xl font-black italic">...</h4>
                     </div>
-                    <div class="bg-white p-10 rounded-[50px] border shadow-sm flex flex-col justify-center">
-                        <p class="text-slate-400 text-[10px] font-black uppercase mb-4 tracking-widest">System Health</p>
-                        <span class="text-green-500 font-black text-lg flex items-center gap-3"><span class="h-3 w-3 bg-green-500 rounded-full pulse-soft"></span> LIVE SYNC ACTIVE</span>
+                    <div class="text-right">
+                        <span class="text-green-400 font-black text-sm flex items-center gap-2">
+                            <span class="h-3 w-3 bg-green-500 rounded-full pulse-soft"></span> LIVE CLOUD SYNC
+                        </span>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-[50px] border shadow-sm p-10">
-                    <h3 class="text-slate-300 font-black text-[11px] uppercase mb-8 tracking-widest">Recent Activity</h3>
+                <div class="bg-white rounded-[60px] border p-12 shadow-sm">
+                    <h3 class="text-slate-300 font-black text-[10px] uppercase mb-8 tracking-widest italic">Live Activity Feed</h3>
                     <div id="historyLogs" class="divide-y divide-slate-50"></div>
                 </div>
 
-                <div class="bg-slate-900 p-12 rounded-[60px] text-white shadow-2xl">
-                    <p class="mb-6 text-slate-400 text-xs font-bold uppercase tracking-widest text-center">Batch Update Master List</p>
-                    <textarea id="bulkInput" placeholder="Paste names here..." class="w-full h-48 p-8 bg-slate-800 border-0 rounded-[40px] mb-8 outline-none text-slate-300 text-xl"></textarea>
-                    <button onclick="uploadToCloud()" class="w-full bg-blue-600 p-8 rounded-3xl font-black text-2xl hover:bg-blue-500 shadow-xl transition-all">SYNC DATABASE</button>
+                <div class="bg-slate-900 p-12 rounded-[70px] text-white shadow-2xl">
+                    <p class="mb-6 text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] text-center">Batch Sync</p>
+                    <textarea id="bulkInput" placeholder="Paste master names here..." class="w-full h-40 p-8 bg-slate-800 border-0 rounded-[40px] mb-8 outline-none text-slate-300 text-xl"></textarea>
+                    <button onclick="uploadToCloud()" class="w-full bg-blue-600 p-8 rounded-[30px] font-black text-2xl hover:bg-blue-500 transition-all shadow-xl active:scale-95">UPDATE MASTER LIST</button>
                 </div>
             </div>
         </div>
