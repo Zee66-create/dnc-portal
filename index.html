@@ -46,6 +46,8 @@
 
         // --- REAL-TIME SEARCH ---
         let typingTimer;
+       // --- REAL-TIME SEARCH (REPLACE THE OLD ONE WITH THIS) ---
+        let typingTimer;
         window.searchDatabase = () => {
             clearTimeout(typingTimer);
             typingTimer = setTimeout(async () => {
@@ -53,30 +55,38 @@
                 const clean = raw.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
                 const box = document.getElementById('statusBox');
 
-                if(clean.length < 2) { box.classList.add('hidden'); return; }
-                box.classList.remove('hidden');
+                // If input is empty, hide the result box
+                if(clean.length < 2) { 
+                    box.classList.add('hidden'); 
+                    return; 
+                }
 
+                // 1. Check Firestore for the name
                 const q = query(collection(db, "dnc_names"), where("name_clean", "==", clean), limit(1));
                 const snap = await getDocs(q);
                 const isMatch = !snap.empty;
 
+                // 2. Log to history
                 await addDoc(collection(db, "search_history"), {
                     searched_name: clean,
                     was_match: isMatch,
-                    staff_member: document.getElementById('user').value || "Staff",
+                    staff_member: document.getElementById('userBadge').innerText || "Staff",
                     timestamp: new Date()
                 });
 
+                // 3. FORCE SHOW THE RESULT BOX
+                box.classList.remove('hidden'); 
+
                 if(isMatch) {
-                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-red-50 border-red-500 text-red-900 shadow-2xl scale-105 transition-all";
+                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-red-50 border-red-500 text-red-900 shadow-2xl scale-105 transition-all block";
                     document.getElementById('statusTitle').innerText = "LITIGATOR MATCH";
                     document.getElementById('statusIcon').className = "fas fa-skull-crossbones text-7xl mb-4 text-red-600";
                 } else {
-                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-green-50 border-green-500 text-green-900 shadow-2xl scale-105 transition-all";
+                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-green-50 border-green-500 text-green-900 shadow-2xl scale-105 transition-all block";
                     document.getElementById('statusTitle').innerText = "CLEAN";
                     document.getElementById('statusIcon').className = "fas fa-check-circle text-7xl mb-4 text-green-600";
                 }
-            }, 400);
+            }, 400); 
         };
 
         // --- ADMIN DASHBOARD ---
