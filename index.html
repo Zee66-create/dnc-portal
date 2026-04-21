@@ -8,446 +8,67 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
-<!-- Firebase modular SDK -->
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-import {
-  getFirestore, collection, addDoc, getDocs, query, where,
-  orderBy, limit, onSnapshot, writeBatch, doc, getDoc, setDoc, deleteDoc, increment
-} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-
-// ══════════════════════════════════════════
-//  FIREBASE CONFIG
-// ══════════════════════════════════════════
-const firebaseConfig = {
-  apiKey: "AIzaSyAhqD4MPcFfiNAPakwnP6LSgcYPca-c4hg",
-  authDomain: "mcc-dnc-portal-4bc1a.firebaseapp.com",
-  projectId: "mcc-dnc-portal-4bc1a",
-  storageBucket: "mcc-dnc-portal-4bc1a.firebasestorage.app",
-  messagingSenderId: "647629631979",
-  appId: "1:647629631979:web:389e484050ea08863a29ae"
-};
-
-const app = initializeApp(firebaseConfig);
-const db  = getFirestore(app);
-
-// ══════════════════════════════════════════
-//  BEEP SOUND (Web Audio API — no file needed)
-// ══════════════════════════════════════════
-function playAlert() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.18, 0.36].forEach(t => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.connect(g); g.connect(ctx.destination);
-      o.type = 'square';
-      o.frequency.setValueAtTime(880, ctx.currentTime + t);
-      g.gain.setValueAtTime(0.3, ctx.currentTime + t);
-      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15);
-      o.start(ctx.currentTime + t);
-      o.stop(ctx.currentTime + t + 0.15);
-    });
-  } catch(e) {}
-}
-
-function playClean() {
-  try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.connect(g); g.connect(ctx.destination);
-    o.type = 'sine';
-    o.frequency.setValueAtTime(523, ctx.currentTime);
-    o.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
-    g.gain.setValueAtTime(0.2, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    o.start(ctx.currentTime);
-    o.stop(ctx.currentTime + 0.3);
-  } catch(e) {}
-}
-
-// ══════════════════════════════════════════
-//  TIMEZONE SETTINGS (editable by admin)
-// ══════════════════════════════════════════
-let tzSettings = {
-  tz1: { label: 'EST', zone: 'America/New_York' },
-  tz2: { label: 'PST', zone: 'America/Los_Angeles' }
-};
-
-// Load saved tz from Firestore
-async function loadTzSettings() {
-  try {
-    const snap = await getDoc(doc(db, '_meta', 'settings'));
-    if (snap.exists() && snap.data().tzSettings) {
-      tzSettings = snap.data().tzSettings;
-    }
-  } catch(e) {}
-  startClock();
-}
-
-async function saveTzSettings() {
-  const l1 = document.getElementById('tz1Label').value.trim() || 'TZ1';
-  const z1 = document.getElementById('tz1Zone').value.trim()  || 'America/New_York';
-  const l2 = document.getElementById('tz2Label').value.trim() || 'TZ2';
-  const z2 = document.getElementById('tz2Zone').value.trim()  || 'America/Los_Angeles';
-  tzSettings = { tz1:{label:l1,zone:z1}, tz2:{label:l2,zone:z2} };
-  try {
-    await setDoc(doc(db,'_meta','settings'), { tzSettings }, { merge:true });
-  } catch(e) {}
-  document.getElementById('tzModal').classList.add('hidden');
-}
-
-function startClock() {
-  clearInterval(window._clockInterval);
-  window._clockInterval = setInterval(() => {
-    const now = new Date();
-    const fmt  = tz => now.toLocaleTimeString('en-US', { timeZone:tz, hour:'2-digit', minute:'2-digit', second:'2-digit' });
-    const fmtD = tz => now.toLocaleDateString('en-US', { timeZone:tz, weekday:'short', month:'short', day:'numeric' });
-    const el1t = document.getElementById('clock1time');
-    const el1d = document.getElementById('clock1date');
-    const el2t = document.getElementById('clock2time');
-    const el2d = document.getElementById('clock2date');
-    const el1l = document.getElementById('clock1label');
-    const el2l = document.getElementById('clock2label');
-    if(el1t) { el1t.textContent = fmt(tzSettings.tz1.zone);  el1d.textContent = fmtD(tzSettings.tz1.zone); el1l.textContent = tzSettings.tz1.label; }
-    if(el2t) { el2t.textContent = fmt(tzSettings.tz2.zone);  el2d.textContent = fmtD(tzSettings.tz2.zone); el2l.textContent = tzSettings.tz2.label; }
-  }, 1000);
-}
-
-// ══════════════════════════════════════════
-//  AUTH
-// ══════════════════════════════════════════
-let currentUser = null;
-let currentRole = null;
-
-window.handleLogin = () => {
-  const u = document.getElementById('loginUser').value.trim().toLowerCase();
-  const p = document.getElementById('loginPass').value;
-  const errEl = document.getElementById('loginErr');
-  if (u === 'admin' && p === 'admin123') {
-    currentUser = 'admin'; currentRole = 'ADMIN';
-    errEl.classList.add('hidden');
-    showPage(true);
-  } else if (u === 'staff' && p === 'staff123') {
-    currentUser = 'staff'; currentRole = 'STAFF';
-    errEl.classList.add('hidden');
-    showPage(false);
-  } else {
-    errEl.classList.remove('hidden');
-  }
-};
-
-window.handleLogout = () => {
-  currentUser = null; currentRole = null;
-  clearInterval(window._clockInterval);
-  if(window._histUnsub) window._histUnsub();
-  if(window._countUnsub) window._countUnsub();
-  document.getElementById('mainApp').classList.add('hidden');
-  document.getElementById('loginSection').classList.remove('hidden');
-  document.getElementById('loginUser').value = '';
-  document.getElementById('loginPass').value = '';
-  // Reset search
-  document.getElementById('globalSearch').value = '';
-  document.getElementById('firstNameSearch').value = '';
-  document.getElementById('lastNameSearch').value = '';
-  hideResult();
-};
-
-document.getElementById('loginPass').addEventListener('keydown', e => {
-  if(e.key === 'Enter') window.handleLogin();
-});
-
-function showPage(isAdmin) {
-  document.getElementById('loginSection').classList.add('hidden');
-  document.getElementById('mainApp').classList.remove('hidden');
-  document.getElementById('userBadge').textContent = currentRole;
-
-  // Show/hide admin controls
-  document.querySelectorAll('.admin-only').forEach(el => {
-    el.classList.toggle('hidden', !isAdmin);
-  });
-  // Edit clock button only for admin
-  document.getElementById('editTzBtn').classList.toggle('hidden', !isAdmin);
-
-  loadTzSettings();
-  if(isAdmin) initAdminSystem();
-}
-
-// ══════════════════════════════════════════
-//  SEARCH — unified logic
-// ══════════════════════════════════════════
-let searchTimer = null;
-
-function cleanName(s) {
-  return s.replace(/[\/\-_@]/g,"").replace(/\s+/g,' ').trim().toLowerCase();
-}
-
-async function doSearch(fullName) {
-  if(!fullName || fullName.length < 2) { hideResult(); return; }
-
-  showSpinner(true);
-
-  const q = query(
-    collection(db, 'dnc_names'),
-    where('name_clean','==', fullName),
-    limit(1)
-  );
-  const snap = await getDocs(q);
-  const isMatch = !snap.empty;
-
-  showSpinner(false);
-  renderResult(isMatch, fullName);
-
-  // Log
-  addDoc(collection(db,'search_history'),{
-    searched_name: fullName,
-    was_match: isMatch,
-    staff_member: currentRole || 'USER',
-    timestamp: new Date()
-  }).catch(()=>{});
-}
-
-// Global search box
-window.onGlobalSearch = () => {
-  clearTimeout(searchTimer);
-  const val = cleanName(document.getElementById('globalSearch').value);
-
-  // Auto-split into first/last
-  const parts = val.split(' ').filter(Boolean);
-  if(parts.length >= 2) {
-    document.getElementById('firstNameSearch').value = parts[0];
-    document.getElementById('lastNameSearch').value  = parts.slice(1).join(' ');
-  } else if(parts.length === 1) {
-    document.getElementById('firstNameSearch').value = parts[0];
-    document.getElementById('lastNameSearch').value  = '';
-  }
-
-  if(val.length < 2) { hideResult(); return; }
-  searchTimer = setTimeout(() => doSearch(val), 400);
-};
-
-// Split field search
-window.onSplitSearch = () => {
-  clearTimeout(searchTimer);
-  const first = cleanName(document.getElementById('firstNameSearch').value);
-  const last  = cleanName(document.getElementById('lastNameSearch').value);
-  const full  = [first, last].filter(Boolean).join(' ');
-
-  // Sync to global box
-  document.getElementById('globalSearch').value = [first, last].filter(Boolean).join(' ');
-
-  if(full.length < 2) { hideResult(); return; }
-  searchTimer = setTimeout(() => doSearch(full), 400);
-};
-
-function renderResult(isMatch, name) {
-  const box = document.getElementById('resultBox');
-  box.classList.remove('hidden','result-match','result-clean');
-  void box.offsetWidth; // force reflow for animation
-
-  if(isMatch) {
-    box.classList.add('result-match');
-    document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-skull-crossbones"></i>';
-    document.getElementById('resultTitle').textContent = 'LITIGATOR MATCH';
-    document.getElementById('resultSub').textContent   = `⚠️ "${name.toUpperCase()}" is on the DNC list`;
-    playAlert();
-    // Flash screen
-    document.body.classList.add('flash-red');
-    setTimeout(()=> document.body.classList.remove('flash-red'), 600);
-  } else {
-    box.classList.add('result-clean');
-    document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-shield-halved"></i>';
-    document.getElementById('resultTitle').textContent = 'CLEAN';
-    document.getElementById('resultSub').textContent   = `✓ No DNC record found for "${name.toUpperCase()}"`;
-    playClean();
-  }
-}
-
-function hideResult() {
-  document.getElementById('resultBox').classList.add('hidden');
-  document.getElementById('resultBox').classList.remove('result-match','result-clean');
-}
-
-function showSpinner(show) {
-  document.getElementById('searchSpinner').classList.toggle('hidden', !show);
-}
-
-// ══════════════════════════════════════════
-//  ADMIN SYSTEM
-// ══════════════════════════════════════════
-function initAdminSystem() {
-  // Live count
-  window._countUnsub = onSnapshot(collection(db,'dnc_names'), s => {
-    document.getElementById('countDisplay').textContent = s.size.toLocaleString();
-  });
-
-  // Live history
-  const hq = query(collection(db,'search_history'), orderBy('timestamp','desc'), limit(15));
-  window._histUnsub = onSnapshot(hq, s => {
-    let h = '';
-    s.forEach(d => {
-      const data = d.data();
-      const time = data.timestamp?.toDate().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) || '';
-      const isM  = data.was_match;
-      h += `<div class="hist-row ${isM?'hist-match':'hist-clean'}">
-              <div class="hist-left">
-                <span class="hist-time">${time}</span>
-                <span class="hist-name">${(data.searched_name||'').toUpperCase()}</span>
-              </div>
-              <div class="hist-right">
-                <span class="hist-user">${data.staff_member||'USER'}</span>
-                <span class="hist-badge ${isM?'badge-match':'badge-clean'}">${isM?'MATCH':'CLEAN'}</span>
-              </div>
-            </div>`;
-    });
-    document.getElementById('historyLogs').innerHTML = h || '<p class="no-hist">No activity yet</p>';
-  });
-}
-
-window.uploadToCloud = async () => {
-  const raw = document.getElementById('bulkInput').value;
-  const names = raw.split('\n').map(n=>n.trim()).filter(n=>n.length>1);
-  if(!names.length){ alert('No names found'); return; }
-
-  const btn = document.getElementById('uploadBtn');
-  btn.textContent = 'UPLOADING...';
-  btn.disabled = true;
-
-  try {
-    const bSize = 499;
-    let added = 0;
-    for(let i=0; i<names.length; i+=bSize) {
-      const chunk = names.slice(i, i+bSize);
-      const batch = writeBatch(db);
-      chunk.forEach(n => {
-        const clean = cleanName(n);
-        const ref   = doc(collection(db,'dnc_names'));
-        batch.set(ref,{ name:n, name_clean:clean });
-      });
-      await batch.commit();
-      added += chunk.length;
-    }
-    alert(`✅ Synced ${added} names to cloud!`);
-    document.getElementById('bulkInput').value = '';
-  } catch(e) {
-    alert('❌ Upload failed: '+e.message);
-  }
-  btn.textContent = 'SYNC TO CLOUD';
-  btn.disabled = false;
-};
-
-window.wipeDatabase = async () => {
-  if(!confirm('⚠️ DELETE ENTIRE DNC DATABASE?\n\nThis cannot be undone!')) return;
-  const confirm2 = prompt('Type DELETE to confirm:');
-  if(confirm2 !== 'DELETE') { alert('Cancelled.'); return; }
-
-  try {
-    let deleted = 0;
-    while(true) {
-      const snap = await getDocs(query(collection(db,'dnc_names'), limit(499)));
-      if(snap.empty) break;
-      const batch = writeBatch(db);
-      snap.forEach(d => batch.delete(d.ref));
-      await batch.commit();
-      deleted += snap.size;
-    }
-    alert(`✅ Deleted ${deleted} records.`);
-  } catch(e) {
-    alert('❌ Error: '+e.message);
-  }
-};
-
-// Timezone modal
-window.openTzModal = () => {
-  document.getElementById('tz1Label').value = tzSettings.tz1.label;
-  document.getElementById('tz1Zone').value  = tzSettings.tz1.zone;
-  document.getElementById('tz2Label').value = tzSettings.tz2.label;
-  document.getElementById('tz2Zone').value  = tzSettings.tz2.zone;
-  document.getElementById('tzModal').classList.remove('hidden');
-};
-window.closeTzModal = () => document.getElementById('tzModal').classList.add('hidden');
-window.saveTzSettings = saveTzSettings;
-
-// Firebase connection check
-import { enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-try { await enableIndexedDbPersistence(db); } catch(e) {}
-
-</script>
+<!-- Firebase compat SDK — exposes firebase.* globally, no module scope issues -->
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <style>
 :root {
-  --red:    #dc2626;
-  --red-bg: #fff1f1;
-  --red-border: #fca5a5;
-  --green:    #16a34a;
-  --green-bg: #f0fdf4;
-  --green-border: #86efac;
-  --dark: #0f172a;
-  --mid:  #1e293b;
-  --accent: #e11d48;
+  --red:         #dc2626;
+  --red-bg:      #fff1f1;
+  --red-border:  #fca5a5;
+  --green:       #16a34a;
+  --green-bg:    #f0fdf4;
+  --green-border:#86efac;
+  --dark:        #0f172a;
+  --mid:         #1e293b;
+  --accent:      #e11d48;
 }
-
 * { box-sizing:border-box; margin:0; padding:0; }
-
 body {
-  font-family: 'DM Sans', sans-serif;
-  background: #f1f5f9;
-  min-height: 100vh;
-  transition: background 0.3s;
+  font-family:'DM Sans',sans-serif;
+  background:#f1f5f9; min-height:100vh;
 }
-
-body.flash-red {
-  animation: flashRed 0.6s ease;
-}
-@keyframes flashRed {
-  0%  { background:#fca5a5; }
-  100%{ background:#f1f5f9; }
-}
+body.flash-red { animation:flashRed 0.6s ease; }
+@keyframes flashRed { 0%{background:#fca5a5;} 100%{background:#f1f5f9;} }
 
 /* ── LOGIN ── */
 #loginSection {
   display:flex; align-items:center; justify-content:center;
   min-height:100vh; padding:20px;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  background:linear-gradient(135deg,#0f172a 0%,#1e293b 50%,#0f172a 100%);
 }
 .login-card {
-  background:#fff;
-  border-radius:28px;
-  padding:48px 40px;
-  width:100%; max-width:420px;
-  text-align:center;
-  box-shadow: 0 30px 80px rgba(0,0,0,0.4);
-  animation: slideUp 0.5s cubic-bezier(0.34,1.56,0.64,1);
+  background:#fff; border-radius:28px; padding:48px 40px;
+  width:100%; max-width:420px; text-align:center;
+  box-shadow:0 30px 80px rgba(0,0,0,0.4);
+  animation:slideUp 0.5s cubic-bezier(0.34,1.56,0.64,1);
 }
 @keyframes slideUp {
-  from { opacity:0; transform:translateY(40px) scale(0.95); }
-  to   { opacity:1; transform:translateY(0) scale(1); }
+  from{opacity:0;transform:translateY(40px) scale(0.95);}
+  to{opacity:1;transform:translateY(0) scale(1);}
 }
-.login-card img { height:64px; margin:0 auto 20px; display:block; }
+.login-card img { height:70px; margin:0 auto 20px; display:block; }
 .login-card h1 {
   font-family:'Barlow Condensed',sans-serif;
-  font-size:32px; font-weight:900;
-  color:var(--dark); letter-spacing:-1px; margin-bottom:4px;
+  font-size:32px; font-weight:900; color:var(--dark);
+  letter-spacing:-1px; margin-bottom:4px;
 }
-.login-card p { color:#94a3b8; font-size:12px; margin-bottom:32px; letter-spacing:2px; }
+.login-card p { color:#94a3b8; font-size:11px; margin-bottom:32px; letter-spacing:3px; text-transform:uppercase; }
 .login-input {
   width:100%; padding:14px 18px;
   border:2px solid #e2e8f0; border-radius:14px;
   font-size:15px; font-family:'DM Sans',sans-serif;
-  outline:none; margin-bottom:14px;
-  transition:border-color 0.2s, box-shadow 0.2s;
-  background:#f8fafc;
+  outline:none; margin-bottom:14px; background:#f8fafc;
+  transition:border-color 0.2s,box-shadow 0.2s;
 }
 .login-input:focus { border-color:var(--accent); box-shadow:0 0 0 4px #fce7f3; }
 .login-btn {
   width:100%; padding:16px;
-  background:var(--dark); color:#fff;
-  border:none; border-radius:14px;
-  font-family:'Barlow Condensed',sans-serif;
+  background:var(--dark); color:#fff; border:none;
+  border-radius:14px; font-family:'Barlow Condensed',sans-serif;
   font-size:20px; font-weight:800; letter-spacing:2px;
-  cursor:pointer; transition:all 0.2s;
-  margin-top:4px;
+  cursor:pointer; transition:all 0.2s; margin-top:4px;
 }
 .login-btn:hover { background:var(--accent); transform:translateY(-1px); box-shadow:0 8px 24px #e11d4844; }
 .login-btn:active { transform:scale(0.98); }
@@ -459,16 +80,14 @@ body.flash-red {
 
 /* ── NAVBAR ── */
 .navbar {
-  background:#fff;
-  border-bottom:1px solid #e2e8f0;
-  padding:0 24px;
-  height:64px;
+  background:#fff; border-bottom:1px solid #e2e8f0;
+  padding:0 24px; height:64px;
   display:flex; align-items:center; justify-content:space-between;
   position:sticky; top:0; z-index:100;
   box-shadow:0 1px 12px rgba(0,0,0,0.06);
 }
 .navbar-left { display:flex; align-items:center; gap:14px; }
-.navbar-logo { height:36px; }
+.navbar-logo  { height:36px; }
 .navbar-title {
   font-family:'Barlow Condensed',sans-serif;
   font-size:20px; font-weight:800; color:var(--dark); letter-spacing:1px;
@@ -477,8 +96,7 @@ body.flash-red {
 .user-badge {
   background:#f1f5f9; color:#475569;
   font-size:10px; font-weight:700; letter-spacing:2px;
-  padding:5px 14px; border-radius:100px;
-  text-transform:uppercase;
+  padding:5px 14px; border-radius:100px; text-transform:uppercase;
 }
 .nav-btn {
   padding:8px 16px; border-radius:10px;
@@ -493,27 +111,24 @@ body.flash-red {
 
 /* ── DUAL CLOCK ── */
 .clock-bar {
-  background:var(--dark);
-  padding:12px 24px;
+  background:var(--dark); padding:12px 24px;
   display:flex; align-items:center; justify-content:space-between;
 }
-.clock-zones { display:flex; gap:24px; }
+.clock-zones { display:flex; gap:16px; }
 .clock-zone {
   display:flex; flex-direction:column; align-items:center;
   padding:10px 24px; border-radius:12px;
-  background:rgba(255,255,255,0.06);
-  border:1px solid rgba(255,255,255,0.1);
-  min-width:160px;
+  background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.1);
+  min-width:155px;
 }
 .clock-label {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:11px; font-weight:700; letter-spacing:3px;
-  color:#64748b; text-transform:uppercase; margin-bottom:2px;
+  font-family:'Barlow Condensed',sans-serif; font-size:11px;
+  font-weight:700; letter-spacing:3px; color:#64748b;
+  text-transform:uppercase; margin-bottom:2px;
 }
 .clock-time {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:26px; font-weight:800; color:#f8fafc; letter-spacing:1px;
-  line-height:1;
+  font-family:'Barlow Condensed',sans-serif; font-size:26px;
+  font-weight:800; color:#f8fafc; letter-spacing:1px; line-height:1;
 }
 .clock-date { font-size:10px; color:#475569; margin-top:2px; }
 .edit-tz-btn {
@@ -527,45 +142,35 @@ body.flash-red {
 
 /* ── MAIN CONTENT ── */
 .main-content {
-  max-width:900px; margin:0 auto; padding:28px 20px 60px;
+  max-width:900px; margin:0 auto;
+  padding:28px 20px 60px;
   display:flex; flex-direction:column; gap:20px;
 }
 
 /* ── SEARCH CARD ── */
 .search-card {
-  background:#fff; border-radius:24px;
-  padding:36px 36px 32px;
-  border:1px solid #e2e8f0;
-  box-shadow:0 2px 20px rgba(0,0,0,0.05);
+  background:#fff; border-radius:24px; padding:36px 36px 32px;
+  border:1px solid #e2e8f0; box-shadow:0 2px 20px rgba(0,0,0,0.05);
 }
 .search-card h2 {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:22px; font-weight:800; letter-spacing:3px;
-  color:var(--dark); text-align:center; margin-bottom:4px;
-  text-transform:uppercase;
+  font-family:'Barlow Condensed',sans-serif; font-size:22px;
+  font-weight:800; letter-spacing:3px; color:var(--dark);
+  text-align:center; margin-bottom:4px; text-transform:uppercase;
 }
 .search-card p { text-align:center; color:#94a3b8; font-size:13px; margin-bottom:24px; }
-
 .global-input {
-  width:100%; padding:18px 24px;
-  font-size:22px; font-weight:600;
-  font-family:'Barlow Condensed',sans-serif;
-  letter-spacing:1px;
+  width:100%; padding:18px 24px; font-size:22px; font-weight:600;
+  font-family:'Barlow Condensed',sans-serif; letter-spacing:1px;
   border:3px solid #e2e8f0; border-radius:16px;
-  text-align:center; outline:none;
-  background:#fafafa; color:var(--dark);
+  text-align:center; outline:none; background:#fafafa; color:var(--dark);
   transition:all 0.25s;
 }
-.global-input:focus { border-color:var(--accent); box-shadow:0 0 0 5px #fce7f366; background:#fff; }
+.global-input:focus { border-color:var(--accent); box-shadow:0 0 0 5px #fce7f322; background:#fff; }
 .global-input::placeholder { color:#cbd5e1; font-weight:400; }
-
 .split-row {
-  display:grid; grid-template-columns:1fr 1fr; gap:12px;
-  margin-top:12px;
+  display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px;
 }
-.split-field {
-  position:relative;
-}
+.split-field { position:relative; }
 .split-label {
   position:absolute; top:-9px; left:14px;
   background:#fff; padding:0 6px;
@@ -573,237 +178,125 @@ body.flash-red {
   color:#94a3b8; text-transform:uppercase; z-index:1;
 }
 .split-input {
-  width:100%; padding:13px 18px;
-  font-size:15px; font-weight:600;
+  width:100%; padding:13px 18px; font-size:15px; font-weight:600;
   border:2px solid #e2e8f0; border-radius:12px;
   outline:none; background:#fafafa; color:var(--dark);
   transition:all 0.2s; font-family:'DM Sans',sans-serif;
 }
 .split-input:focus { border-color:#94a3b8; background:#fff; }
-
 .search-spinner {
-  text-align:center; padding:12px;
-  color:#94a3b8; font-size:13px; font-weight:500;
-  animation:pulse 1s ease infinite;
+  text-align:center; padding:14px; color:#94a3b8;
+  font-size:13px; font-weight:500; animation:spinPulse 1s ease infinite;
 }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+@keyframes spinPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
 /* ── RESULT BOX ── */
 #resultBox {
-  border-radius:20px; padding:36px;
-  text-align:center; border-width:3px; border-style:solid;
-  margin-top:20px;
+  border-radius:20px; padding:36px 24px;
+  text-align:center; border:3px solid transparent;
+  margin-top:20px; display:none;
   animation:popIn 0.35s cubic-bezier(0.34,1.56,0.64,1);
 }
-#resultBox.hidden { display:none; }
-
 @keyframes popIn {
-  from { opacity:0; transform:scale(0.85); }
-  to   { opacity:1; transform:scale(1); }
+  from{opacity:0;transform:scale(0.85);}
+  to{opacity:1;transform:scale(1);}
 }
-
-.result-match {
-  background:var(--red-bg) !important;
-  border-color:var(--red-border) !important;
-  animation:popIn 0.35s cubic-bezier(0.34,1.56,0.64,1), shakeBox 0.5s ease !important;
+#resultBox.result-match {
+  display:block;
+  background:var(--red-bg); border-color:var(--red-border);
+  animation:popIn 0.35s cubic-bezier(0.34,1.56,0.64,1), shakeBox 0.5s ease;
 }
 @keyframes shakeBox {
   0%,100%{transform:translateX(0)}
-  15%{transform:translateX(-8px)}
-  30%{transform:translateX(8px)}
-  45%{transform:translateX(-5px)}
-  60%{transform:translateX(5px)}
+  15%{transform:translateX(-8px)} 30%{transform:translateX(8px)}
+  45%{transform:translateX(-5px)} 60%{transform:translateX(5px)}
   75%{transform:translateX(-2px)}
 }
-.result-clean {
-  background:var(--green-bg) !important;
-  border-color:var(--green-border) !important;
+#resultBox.result-clean {
+  display:block;
+  background:var(--green-bg); border-color:var(--green-border);
 }
-
-#resultIcon i {
-  font-size:56px; margin-bottom:12px; display:block;
-}
-.result-match #resultIcon i { color:var(--red); animation:iconPulse 0.8s ease 2; }
-.result-clean #resultIcon i { color:var(--green); }
-@keyframes iconPulse {
-  0%,100%{transform:scale(1)} 50%{transform:scale(1.2)}
-}
-
+#resultIcon i { font-size:56px; margin-bottom:12px; display:block; }
+#resultBox.result-match #resultIcon i { color:var(--red); animation:iconPulse 0.8s ease 2; }
+#resultBox.result-clean #resultIcon i { color:var(--green); }
+@keyframes iconPulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.2)} }
 #resultTitle {
   font-family:'Barlow Condensed',sans-serif;
-  font-size:52px; font-weight:900; letter-spacing:-1px;
-  line-height:1;
+  font-size:52px; font-weight:900; letter-spacing:-1px; line-height:1;
 }
-.result-match #resultTitle { color:var(--red); }
-.result-clean #resultTitle { color:var(--green); }
+#resultBox.result-match #resultTitle { color:var(--red); }
+#resultBox.result-clean #resultTitle { color:var(--green); }
+#resultSub { font-size:14px; font-weight:500; margin-top:8px; }
+#resultBox.result-match #resultSub { color:#b91c1c; }
+#resultBox.result-clean #resultSub  { color:#15803d; }
 
-#resultSub {
-  font-size:14px; font-weight:500; margin-top:8px;
-}
-.result-match #resultSub { color:#b91c1c; }
-.result-clean #resultSub { color:#15803d; }
-
-/* ── ADMIN CARD ── */
-.admin-card {
-  background:#fff; border-radius:24px;
-  border:1px solid #e2e8f0;
-  box-shadow:0 2px 20px rgba(0,0,0,0.05);
-  overflow:hidden;
-}
-.admin-card-header {
-  padding:18px 24px; border-bottom:1px solid #f1f5f9;
-  display:flex; justify-content:space-between; align-items:center;
-}
-.admin-card-title {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:13px; font-weight:800; letter-spacing:3px;
-  color:#94a3b8; text-transform:uppercase;
-}
-
-/* Stats */
+/* ── ADMIN ── */
 .stats-grid {
-  display:grid; grid-template-columns:1fr 1fr; gap:16px;
-  padding:0;
+  display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:16px;
 }
 .stat-box {
-  background:var(--dark); border-radius:20px;
-  padding:24px 28px;
+  background:var(--dark); border-radius:20px; padding:24px 28px;
   display:flex; justify-content:space-between; align-items:center;
 }
-.stat-label {
-  font-size:10px; font-weight:700; letter-spacing:3px;
-  color:#475569; text-transform:uppercase; margin-bottom:8px;
+.stat-label { font-size:10px; font-weight:700; letter-spacing:3px; color:#475569; text-transform:uppercase; margin-bottom:8px; }
+.stat-value { font-family:'Barlow Condensed',sans-serif; font-size:44px; font-weight:900; color:#f8fafc; line-height:1; }
+.stat-icon  { font-size:24px; opacity:0.4; }
+.live-dot   {
+  display:inline-block; width:8px; height:8px; border-radius:50%;
+  background:#22c55e; animation:livePulse 1.5s ease infinite; margin-right:8px;
 }
-.stat-value {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:44px; font-weight:900; color:#f8fafc;
-  line-height:1;
-}
-.stat-icon { font-size:24px; opacity:0.4; }
-.live-dot {
-  display:inline-block; width:8px; height:8px;
-  border-radius:50%; background:#22c55e;
-  animation:livePulse 1.5s ease infinite;
-  margin-right:8px;
-}
-@keyframes livePulse {
-  0%,100%{opacity:1;transform:scale(1)}
-  50%{opacity:0.3;transform:scale(0.7)}
-}
-.live-text {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:14px; font-weight:700; color:#22c55e; letter-spacing:2px;
-}
+@keyframes livePulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.3;transform:scale(0.7)} }
+.live-text  { font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:700; color:#22c55e; letter-spacing:2px; }
 
-/* History */
-.hist-row {
-  display:flex; justify-content:space-between; align-items:center;
-  padding:11px 24px; border-bottom:1px solid #f8fafc;
-  transition:background 0.15s;
-}
+.admin-card { background:#fff; border-radius:24px; border:1px solid #e2e8f0; box-shadow:0 2px 20px rgba(0,0,0,0.05); overflow:hidden; margin-bottom:16px; }
+.admin-card-header { padding:18px 24px; border-bottom:1px solid #f1f5f9; display:flex; justify-content:space-between; align-items:center; }
+.admin-card-title  { font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:800; letter-spacing:3px; color:#94a3b8; text-transform:uppercase; }
+
+.hist-row  { display:flex; justify-content:space-between; align-items:center; padding:11px 24px; border-bottom:1px solid #f8fafc; transition:background 0.15s; }
 .hist-row:hover { background:#fafafa; }
 .hist-match { border-left:3px solid #fca5a5; }
 .hist-clean { border-left:3px solid #86efac; }
-.hist-left { display:flex; flex-direction:column; gap:1px; }
-.hist-time { font-size:10px; color:#94a3b8; font-family:monospace; }
-.hist-name { font-size:14px; font-weight:700; color:var(--dark); }
+.hist-left  { display:flex; flex-direction:column; gap:1px; }
+.hist-time  { font-size:10px; color:#94a3b8; font-family:monospace; }
+.hist-name  { font-size:14px; font-weight:700; color:var(--dark); }
 .hist-right { display:flex; align-items:center; gap:10px; }
-.hist-user { font-size:10px; color:#94a3b8; font-weight:600; letter-spacing:1px; }
-.hist-badge {
-  font-size:9px; font-weight:800; letter-spacing:1.5px;
-  padding:3px 10px; border-radius:100px;
-}
+.hist-user  { font-size:10px; color:#94a3b8; font-weight:600; letter-spacing:1px; }
+.hist-badge { font-size:9px; font-weight:800; letter-spacing:1.5px; padding:3px 10px; border-radius:100px; }
 .badge-match { background:#fee2e2; color:#dc2626; }
 .badge-clean { background:#dcfce7; color:#16a34a; }
-.no-hist { text-align:center; padding:32px; color:#cbd5e1; font-size:13px; }
+.no-hist    { text-align:center; padding:32px; color:#cbd5e1; font-size:13px; }
 
-/* Bulk upload */
-.upload-card {
-  background:var(--dark); border-radius:24px; padding:28px;
-}
-.upload-title {
-  font-size:11px; font-weight:700; letter-spacing:3px;
-  color:#475569; text-transform:uppercase; margin-bottom:4px;
-}
-.upload-sub { font-size:12px; color:#334155; margin-bottom:16px; }
-.upload-ta {
-  width:100%; height:140px; padding:16px;
-  background:#0f172a; border:1px solid #1e293b;
-  border-radius:14px; color:#e2e8f0;
-  font-family:monospace; font-size:13px; line-height:1.6;
-  outline:none; resize:none;
-  transition:border-color 0.2s;
-}
+.upload-card   { background:var(--dark); border-radius:24px; padding:28px; }
+.upload-title  { font-size:11px; font-weight:700; letter-spacing:3px; color:#475569; text-transform:uppercase; margin-bottom:4px; }
+.upload-sub    { font-size:12px; color:#334155; margin-bottom:16px; }
+.upload-ta     { width:100%; height:140px; padding:16px; background:#0f172a; border:1px solid #1e293b; border-radius:14px; color:#e2e8f0; font-family:monospace; font-size:13px; line-height:1.6; outline:none; resize:none; transition:border-color 0.2s; }
 .upload-ta:focus { border-color:#475569; }
 .upload-ta::placeholder { color:#334155; }
 .upload-actions { display:flex; gap:10px; margin-top:12px; }
-.btn-upload {
-  flex:1; padding:14px;
-  background:var(--accent); color:#fff;
-  border:none; border-radius:12px;
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:18px; font-weight:800; letter-spacing:2px;
-  cursor:pointer; transition:all 0.2s;
-}
+.btn-upload { flex:1; padding:14px; background:var(--accent); color:#fff; border:none; border-radius:12px; font-family:'Barlow Condensed',sans-serif; font-size:18px; font-weight:800; letter-spacing:2px; cursor:pointer; transition:all 0.2s; }
 .btn-upload:hover { background:#be123c; }
 .btn-upload:disabled { opacity:0.5; cursor:not-allowed; }
-.btn-wipe {
-  padding:14px 20px;
-  background:#1e293b; color:#ef4444;
-  border:1px solid #ef444422; border-radius:12px;
-  font-size:14px; cursor:pointer; transition:all 0.2s;
-}
+.btn-wipe   { padding:14px 20px; background:#1e293b; color:#ef4444; border:1px solid #ef444422; border-radius:12px; font-size:14px; cursor:pointer; transition:all 0.2s; }
 .btn-wipe:hover { background:#ef4444; color:#fff; }
 
-/* ── TZ MODAL ── */
-.modal-overlay {
-  position:fixed; inset:0; z-index:999;
-  background:rgba(0,0,0,0.6);
-  display:flex; align-items:center; justify-content:center;
-  backdrop-filter:blur(4px);
-}
+/* ── MODAL ── */
+.modal-overlay { position:fixed; inset:0; z-index:999; background:rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; backdrop-filter:blur(4px); }
 .modal-overlay.hidden { display:none; }
-.modal-box {
-  background:#fff; border-radius:24px; padding:36px;
-  width:100%; max-width:460px;
-  box-shadow:0 30px 80px rgba(0,0,0,0.3);
-  animation:slideUp 0.3s ease;
-}
-.modal-title {
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:24px; font-weight:900; color:var(--dark);
-  margin-bottom:4px;
-}
-.modal-sub { font-size:12px; color:#94a3b8; margin-bottom:24px; }
-.modal-grid { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-bottom:12px; }
+.modal-box { background:#fff; border-radius:24px; padding:36px; width:100%; max-width:460px; box-shadow:0 30px 80px rgba(0,0,0,0.3); animation:slideUp 0.3s ease; }
+.modal-title { font-family:'Barlow Condensed',sans-serif; font-size:24px; font-weight:900; color:var(--dark); margin-bottom:4px; }
+.modal-sub   { font-size:12px; color:#94a3b8; margin-bottom:24px; }
+.modal-row   { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-bottom:14px; }
 .modal-label { font-size:11px; font-weight:700; color:#64748b; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px; }
-.modal-input {
-  width:100%; padding:10px 14px;
-  border:2px solid #e2e8f0; border-radius:10px;
-  font-size:14px; outline:none; font-family:'DM Sans',sans-serif;
-}
+.modal-input { width:100%; padding:10px 14px; border:2px solid #e2e8f0; border-radius:10px; font-size:14px; outline:none; font-family:'DM Sans',sans-serif; }
 .modal-input:focus { border-color:var(--accent); }
-.modal-hint { font-size:11px; color:#94a3b8; margin-bottom:20px; line-height:1.5; }
+.modal-hint  { font-size:11px; color:#94a3b8; margin-bottom:20px; line-height:1.6; }
 .modal-actions { display:flex; gap:10px; }
-.btn-save {
-  flex:1; padding:12px;
-  background:var(--dark); color:#fff;
-  border:none; border-radius:10px;
-  font-family:'Barlow Condensed',sans-serif;
-  font-size:17px; font-weight:800; letter-spacing:1px;
-  cursor:pointer; transition:all 0.2s;
-}
+.btn-save    { flex:1; padding:12px; background:var(--dark); color:#fff; border:none; border-radius:10px; font-family:'Barlow Condensed',sans-serif; font-size:17px; font-weight:800; letter-spacing:1px; cursor:pointer; transition:all 0.2s; }
 .btn-save:hover { background:var(--accent); }
-.btn-cancel {
-  padding:12px 20px;
-  background:#f1f5f9; color:#64748b;
-  border:none; border-radius:10px;
-  font-size:14px; font-weight:600;
-  cursor:pointer; transition:all 0.2s;
-}
+.btn-cancel  { padding:12px 20px; background:#f1f5f9; color:#64748b; border:none; border-radius:10px; font-size:14px; font-weight:600; cursor:pointer; }
 .btn-cancel:hover { background:#e2e8f0; }
 
-/* ── RESPONSIVE ── */
+.hidden { display:none !important; }
 @media(max-width:600px){
   .split-row { grid-template-columns:1fr; }
   .stats-grid { grid-template-columns:1fr; }
@@ -813,47 +306,45 @@ body.flash-red {
   .main-content { padding:16px 14px 40px; }
   .search-card { padding:24px 18px; }
   .global-input { font-size:18px; }
+  .navbar-title { display:none; }
 }
 </style>
 </head>
 <body>
 
-<!-- ══════════════ LOGIN ══════════════ -->
+<!-- ══════════ LOGIN ══════════ -->
 <div id="loginSection">
   <div class="login-card">
     <img src="logo.png" alt="MCC" onerror="this.style.display='none'">
     <h1>MCC Portal</h1>
-    <p>AUTHORIZED PERSONNEL ONLY</p>
+    <p>Authorized Personnel Only</p>
     <input type="text"     id="loginUser" class="login-input" placeholder="Username" autocomplete="off">
     <input type="password" id="loginPass" class="login-input" placeholder="Password">
     <button class="login-btn" onclick="handleLogin()">ACCESS SYSTEM</button>
-    <div id="loginErr" class="login-err hidden">❌ Invalid credentials</div>
+    <div id="loginErr" class="login-err hidden">❌ Invalid credentials. Try again.</div>
   </div>
 </div>
 
-<!-- ══════════════ MAIN APP ══════════════ -->
+<!-- ══════════ MAIN APP ══════════ -->
 <div id="mainApp" class="hidden">
 
-  <!-- Navbar -->
   <nav class="navbar">
     <div class="navbar-left">
       <img src="logo.png" alt="MCC" class="navbar-logo" onerror="this.style.display='none'">
       <span class="navbar-title">DNC PORTAL</span>
     </div>
     <div class="navbar-right">
-      <span class="user-badge" id="userBadge">STAFF</span>
-      <!-- Admin: delete data button -->
-      <button class="nav-btn btn-danger admin-only hidden" onclick="wipeDatabase()" title="Delete all DNC data">
+      <span class="user-badge" id="userBadge">USER</span>
+      <button class="nav-btn btn-danger hidden" id="adminDelBtn" onclick="wipeDatabase()" title="Delete all DNC records">
         <i class="fas fa-trash-can"></i> DELETE DATA
       </button>
-      <!-- Logout -->
       <button class="nav-btn btn-logout" onclick="handleLogout()">
         <i class="fas fa-right-from-bracket"></i> LOGOUT
       </button>
     </div>
   </nav>
 
-  <!-- Dual Clock Bar -->
+  <!-- Dual Clock -->
   <div class="clock-bar">
     <div class="clock-zones">
       <div class="clock-zone">
@@ -867,30 +358,19 @@ body.flash-red {
         <div class="clock-date"  id="clock2date">---</div>
       </div>
     </div>
-    <!-- Edit button — admin only -->
-    <button class="edit-tz-btn admin-only hidden" id="editTzBtn" onclick="openTzModal()">
+    <button class="edit-tz-btn hidden" id="editTzBtn" onclick="openTzModal()">
       <i class="fas fa-pen-to-square"></i> EDIT ZONES
     </button>
   </div>
 
-  <!-- Main Content -->
   <div class="main-content">
 
-    <!-- ── SEARCH CARD ── -->
+    <!-- Search -->
     <div class="search-card">
       <h2>Name Verification Scrub</h2>
-      <p>Type a name below — result appears instantly</p>
-
-      <!-- Global search -->
-      <input
-        type="text" id="globalSearch"
-        class="global-input"
-        placeholder="Type full name here..."
-        oninput="onGlobalSearch()"
-        autocomplete="off"
-      >
-
-      <!-- Split first / last -->
+      <p>Type a full name — result appears instantly</p>
+      <input type="text" id="globalSearch" class="global-input"
+        placeholder="Type full name here..." oninput="onGlobalSearch()" autocomplete="off">
       <div class="split-row">
         <div class="split-field">
           <div class="split-label">First Name</div>
@@ -903,25 +383,20 @@ body.flash-red {
             placeholder="Last" oninput="onSplitSearch()" autocomplete="off">
         </div>
       </div>
-
-      <!-- Spinner -->
       <div id="searchSpinner" class="search-spinner hidden">
         <i class="fas fa-circle-notch fa-spin"></i> Searching database...
       </div>
-
-      <!-- Result Box -->
-      <div id="resultBox" class="hidden">
+      <!-- Result -->
+      <div id="resultBox">
         <div id="resultIcon"></div>
         <div id="resultTitle"></div>
         <div id="resultSub"></div>
       </div>
     </div>
 
-    <!-- ── ADMIN CONTROLS ── -->
-    <div class="admin-only hidden" id="adminControls">
-
-      <!-- Stats -->
-      <div class="stats-grid" style="margin-bottom:16px;">
+    <!-- Admin Section -->
+    <div id="adminSection" class="hidden">
+      <div class="stats-grid">
         <div class="stat-box">
           <div>
             <div class="stat-label">DNC Records</div>
@@ -932,7 +407,7 @@ body.flash-red {
         <div class="stat-box">
           <div>
             <div class="stat-label">Firebase Status</div>
-            <div style="margin-top:8px;">
+            <div style="margin-top:10px;">
               <span class="live-dot"></span>
               <span class="live-text">SYNCING LIVE</span>
             </div>
@@ -941,8 +416,7 @@ body.flash-red {
         </div>
       </div>
 
-      <!-- History -->
-      <div class="admin-card" style="margin-bottom:16px;">
+      <div class="admin-card">
         <div class="admin-card-header">
           <span class="admin-card-title">Recent Search Activity</span>
           <span style="font-size:10px;color:#e11d48;font-weight:700;letter-spacing:1px;">REAL-TIME</span>
@@ -952,65 +426,49 @@ body.flash-red {
         </div>
       </div>
 
-      <!-- Bulk Upload -->
       <div class="upload-card">
         <div class="upload-title">Update Master List</div>
         <div class="upload-sub">One name per line — syncs to cloud instantly</div>
         <textarea id="bulkInput" class="upload-ta"
           placeholder="John Smith&#10;Jane Doe&#10;Bob Johnson..."></textarea>
         <div class="upload-actions">
-          <button id="uploadBtn" class="btn-upload" onclick="uploadToCloud()">
-            SYNC TO CLOUD
-          </button>
-          <button class="btn-wipe" onclick="wipeDatabase()" title="Wipe database">
-            <i class="fas fa-trash-can"></i>
-          </button>
+          <button id="uploadBtn" class="btn-upload" onclick="uploadToCloud()">SYNC TO CLOUD</button>
+          <button class="btn-wipe" onclick="wipeDatabase()"><i class="fas fa-trash-can"></i></button>
         </div>
       </div>
+    </div>
 
-    </div><!-- /admin-only -->
+  </div>
+</div>
 
-  </div><!-- /main-content -->
-</div><!-- /mainApp -->
-
-<!-- ══════════════ TIMEZONE MODAL ══════════════ -->
+<!-- TZ Modal -->
 <div class="modal-overlay hidden" id="tzModal" onclick="if(event.target===this)closeTzModal()">
   <div class="modal-box">
     <div class="modal-title">Edit Clock Zones</div>
-    <div class="modal-sub">Set timezone labels and IANA zone names for the dual clock</div>
-
-    <div style="margin-bottom:16px;">
-      <div class="modal-label">Zone 1</div>
-      <div class="modal-grid">
-        <div>
-          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Label</div>
-          <input type="text" id="tz1Label" class="modal-input" placeholder="EST">
-        </div>
-        <div>
-          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">IANA Timezone</div>
-          <input type="text" id="tz1Zone"  class="modal-input" placeholder="America/New_York">
-        </div>
+    <div class="modal-sub">Set timezone labels and IANA zone names</div>
+    <div class="modal-row">
+      <div>
+        <div class="modal-label">Zone 1 Label</div>
+        <input type="text" id="tz1Label" class="modal-input" placeholder="EST">
+      </div>
+      <div>
+        <div class="modal-label">IANA Timezone</div>
+        <input type="text" id="tz1Zone" class="modal-input" placeholder="America/New_York">
       </div>
     </div>
-
-    <div style="margin-bottom:16px;">
-      <div class="modal-label">Zone 2</div>
-      <div class="modal-grid">
-        <div>
-          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Label</div>
-          <input type="text" id="tz2Label" class="modal-input" placeholder="PST">
-        </div>
-        <div>
-          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">IANA Timezone</div>
-          <input type="text" id="tz2Zone"  class="modal-input" placeholder="America/Los_Angeles">
-        </div>
+    <div class="modal-row">
+      <div>
+        <div class="modal-label">Zone 2 Label</div>
+        <input type="text" id="tz2Label" class="modal-input" placeholder="PST">
+      </div>
+      <div>
+        <div class="modal-label">IANA Timezone</div>
+        <input type="text" id="tz2Zone" class="modal-input" placeholder="America/Los_Angeles">
       </div>
     </div>
-
     <div class="modal-hint">
       Examples: <code>America/New_York</code> · <code>America/Chicago</code> · <code>America/Los_Angeles</code> · <code>America/Denver</code> · <code>Europe/London</code> · <code>Asia/Kolkata</code>
     </div>
-
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeTzModal()">Cancel</button>
       <button class="btn-save"   onclick="saveTzSettings()">SAVE ZONES</button>
@@ -1018,5 +476,373 @@ body.flash-red {
   </div>
 </div>
 
+<script>
+// ════════════════════════════════════════════════
+//  FIREBASE — compat SDK (global firebase.* scope)
+// ════════════════════════════════════════════════
+const firebaseConfig = {
+  apiKey:            "AIzaSyAhqD4MPcFfiNAPakwnP6LSgcYPca-c4hg",
+  authDomain:        "mcc-dnc-portal-4bc1a.firebaseapp.com",
+  projectId:         "mcc-dnc-portal-4bc1a",
+  storageBucket:     "mcc-dnc-portal-4bc1a.firebasestorage.app",
+  messagingSenderId: "647629631979",
+  appId:             "1:647629631979:web:389e484050ea08863a29ae"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+// ════════════════════════════════════════════════
+//  CREDENTIALS — change here to update passwords
+// ════════════════════════════════════════════════
+const CREDENTIALS = {
+  admin: { password: "admin123", role: "ADMIN", isAdmin: true  },
+  staff: { password: "staff123", role: "STAFF", isAdmin: false }
+};
+
+let currentUser = null;
+let currentRole = null;
+let _clockInterval = null;
+let _histUnsub     = null;
+let _countUnsub    = null;
+
+// ════════════════════════════════════════════════
+//  SOUNDS
+// ════════════════════════════════════════════════
+function playAlert() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.2, 0.4].forEach(t => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = 'square'; o.frequency.setValueAtTime(880, ctx.currentTime + t);
+      g.gain.setValueAtTime(0.28, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.18);
+      o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.18);
+    });
+  } catch(e) {}
+}
+
+function playClean() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(523, ctx.currentTime);
+    o.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+    g.gain.setValueAtTime(0.18, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    o.start(ctx.currentTime); o.stop(ctx.currentTime + 0.35);
+  } catch(e) {}
+}
+
+// ════════════════════════════════════════════════
+//  AUTH
+// ════════════════════════════════════════════════
+function handleLogin() {
+  const u    = document.getElementById('loginUser').value.trim().toLowerCase();
+  const p    = document.getElementById('loginPass').value;
+  const errEl= document.getElementById('loginErr');
+  const cred = CREDENTIALS[u];
+
+  if (cred && cred.password === p) {
+    currentUser = u;
+    currentRole = cred.role;
+    errEl.classList.add('hidden');
+    showPage(cred.isAdmin);
+  } else {
+    errEl.classList.remove('hidden');
+    document.getElementById('loginPass').value = '';
+    document.getElementById('loginPass').focus();
+  }
+}
+
+function handleLogout() {
+  currentUser = null; currentRole = null;
+  if(_clockInterval) clearInterval(_clockInterval);
+  if(_histUnsub)  _histUnsub();
+  if(_countUnsub) _countUnsub();
+  hideResult();
+  document.getElementById('globalSearch').value    = '';
+  document.getElementById('firstNameSearch').value = '';
+  document.getElementById('lastNameSearch').value  = '';
+  document.getElementById('mainApp').classList.add('hidden');
+  document.getElementById('loginSection').classList.remove('hidden');
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+}
+
+function showPage(isAdmin) {
+  document.getElementById('loginSection').classList.add('hidden');
+  document.getElementById('mainApp').classList.remove('hidden');
+  document.getElementById('userBadge').textContent = currentRole;
+
+  if (isAdmin) {
+    document.getElementById('adminSection').classList.remove('hidden');
+    document.getElementById('adminDelBtn').classList.remove('hidden');
+    document.getElementById('editTzBtn').classList.remove('hidden');
+    initAdminSystem();
+  } else {
+    document.getElementById('adminSection').classList.add('hidden');
+    document.getElementById('adminDelBtn').classList.add('hidden');
+    document.getElementById('editTzBtn').classList.add('hidden');
+  }
+
+  loadTzSettings();
+}
+
+// Enter key on password
+document.getElementById('loginPass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleLogin();
+});
+
+// ════════════════════════════════════════════════
+//  CLOCK
+// ════════════════════════════════════════════════
+let tzSettings = {
+  tz1: { label:'EST', zone:'America/New_York'    },
+  tz2: { label:'PST', zone:'America/Los_Angeles' }
+};
+
+async function loadTzSettings() {
+  try {
+    const snap = await db.collection('_meta').doc('settings').get();
+    if (snap.exists && snap.data().tzSettings) {
+      tzSettings = snap.data().tzSettings;
+    }
+  } catch(e) {}
+  startClock();
+}
+
+function startClock() {
+  if(_clockInterval) clearInterval(_clockInterval);
+  _clockInterval = setInterval(() => {
+    const now = new Date();
+    const fmt  = tz => now.toLocaleTimeString('en-US', { timeZone:tz, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const fmtD = tz => now.toLocaleDateString('en-US', { timeZone:tz, weekday:'short', month:'short', day:'numeric' });
+    document.getElementById('clock1label').textContent = tzSettings.tz1.label;
+    document.getElementById('clock1time').textContent  = fmt(tzSettings.tz1.zone);
+    document.getElementById('clock1date').textContent  = fmtD(tzSettings.tz1.zone);
+    document.getElementById('clock2label').textContent = tzSettings.tz2.label;
+    document.getElementById('clock2time').textContent  = fmt(tzSettings.tz2.zone);
+    document.getElementById('clock2date').textContent  = fmtD(tzSettings.tz2.zone);
+  }, 1000);
+}
+
+function openTzModal() {
+  document.getElementById('tz1Label').value = tzSettings.tz1.label;
+  document.getElementById('tz1Zone').value  = tzSettings.tz1.zone;
+  document.getElementById('tz2Label').value = tzSettings.tz2.label;
+  document.getElementById('tz2Zone').value  = tzSettings.tz2.zone;
+  document.getElementById('tzModal').classList.remove('hidden');
+}
+function closeTzModal() {
+  document.getElementById('tzModal').classList.add('hidden');
+}
+async function saveTzSettings() {
+  tzSettings = {
+    tz1: { label: document.getElementById('tz1Label').value.trim() || 'TZ1', zone: document.getElementById('tz1Zone').value.trim() || 'America/New_York' },
+    tz2: { label: document.getElementById('tz2Label').value.trim() || 'TZ2', zone: document.getElementById('tz2Zone').value.trim() || 'America/Los_Angeles' }
+  };
+  try {
+    await db.collection('_meta').doc('settings').set({ tzSettings }, { merge:true });
+  } catch(e) {}
+  closeTzModal();
+  startClock();
+}
+
+// ════════════════════════════════════════════════
+//  SEARCH
+// ════════════════════════════════════════════════
+let searchTimer = null;
+
+function cleanName(s) {
+  return s.replace(/[\/\-_@]/g,"").replace(/\s+/g,' ').trim().toLowerCase();
+}
+
+function onGlobalSearch() {
+  clearTimeout(searchTimer);
+  const val   = document.getElementById('globalSearch').value;
+  const clean = cleanName(val);
+  const parts = clean.split(' ').filter(Boolean);
+
+  if (parts.length >= 2) {
+    document.getElementById('firstNameSearch').value = parts[0];
+    document.getElementById('lastNameSearch').value  = parts.slice(1).join(' ');
+  } else {
+    document.getElementById('firstNameSearch').value = parts[0] || '';
+    document.getElementById('lastNameSearch').value  = '';
+  }
+
+  if (clean.length < 2) { hideResult(); return; }
+  document.getElementById('searchSpinner').classList.remove('hidden');
+  searchTimer = setTimeout(() => doSearch(clean), 400);
+}
+
+function onSplitSearch() {
+  clearTimeout(searchTimer);
+  const first = cleanName(document.getElementById('firstNameSearch').value);
+  const last  = cleanName(document.getElementById('lastNameSearch').value);
+  const full  = [first, last].filter(Boolean).join(' ');
+  document.getElementById('globalSearch').value = full;
+  if (full.length < 2) { hideResult(); return; }
+  document.getElementById('searchSpinner').classList.remove('hidden');
+  searchTimer = setTimeout(() => doSearch(full), 400);
+}
+
+async function doSearch(name) {
+  document.getElementById('searchSpinner').classList.add('hidden');
+  try {
+    const snap    = await db.collection('dnc_names').where('name_clean','==',name).limit(1).get();
+    const isMatch = !snap.empty;
+    renderResult(isMatch, name);
+
+    // Log (fire and forget)
+    db.collection('search_history').add({
+      searched_name: name,
+      was_match:     isMatch,
+      staff_member:  currentRole || 'USER',
+      timestamp:     firebase.firestore.FieldValue.serverTimestamp()
+    }).catch(()=>{});
+
+  } catch(err) {
+    console.error('Search error:', err);
+    renderError(err.message);
+  }
+}
+
+function renderResult(isMatch, name) {
+  const box = document.getElementById('resultBox');
+  box.className = '';
+  void box.offsetWidth;
+
+  if (isMatch) {
+    box.className = 'result-match';
+    document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-skull-crossbones"></i>';
+    document.getElementById('resultTitle').textContent = 'LITIGATOR MATCH';
+    document.getElementById('resultSub').textContent   = '⚠️ "' + name.toUpperCase() + '" is on the DNC list';
+    playAlert();
+    document.body.classList.add('flash-red');
+    setTimeout(() => document.body.classList.remove('flash-red'), 600);
+  } else {
+    box.className = 'result-clean';
+    document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-shield-halved"></i>';
+    document.getElementById('resultTitle').textContent = 'CLEAN';
+    document.getElementById('resultSub').textContent   = '✓ No DNC record for "' + name.toUpperCase() + '"';
+    playClean();
+  }
+}
+
+function renderError(msg) {
+  const box = document.getElementById('resultBox');
+  box.className = '';
+  box.style.background    = '#fef3c7';
+  box.style.borderColor   = '#f59e0b';
+  box.style.border        = '3px solid #f59e0b';
+  box.style.display       = 'block';
+  box.style.borderRadius  = '20px';
+  box.style.padding       = '36px 24px';
+  box.style.textAlign     = 'center';
+  document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-triangle-exclamation" style="font-size:48px;color:#f59e0b;margin-bottom:12px;display:block;"></i>';
+  document.getElementById('resultTitle').textContent = 'CONNECTION ERROR';
+  document.getElementById('resultTitle').style.color = '#92400e';
+  document.getElementById('resultSub').textContent   = msg;
+  document.getElementById('resultSub').style.color   = '#92400e';
+}
+
+function hideResult() {
+  const box = document.getElementById('resultBox');
+  box.className = '';
+  box.removeAttribute('style');
+}
+
+// ════════════════════════════════════════════════
+//  ADMIN SYSTEM
+// ════════════════════════════════════════════════
+function initAdminSystem() {
+  // Live count via snapshot
+  _countUnsub = db.collection('dnc_names').onSnapshot(snap => {
+    document.getElementById('countDisplay').textContent = snap.size.toLocaleString();
+  });
+
+  // Live history
+  _histUnsub = db.collection('search_history')
+    .orderBy('timestamp','desc')
+    .limit(15)
+    .onSnapshot(snap => {
+      let h = '';
+      snap.forEach(d => {
+        const data = d.data();
+        const ts   = data.timestamp ? data.timestamp.toDate() : new Date();
+        const time = ts.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+        const isM  = data.was_match;
+        h += `<div class="hist-row ${isM?'hist-match':'hist-clean'}">
+                <div class="hist-left">
+                  <span class="hist-time">${time}</span>
+                  <span class="hist-name">${(data.searched_name||'').toUpperCase()}</span>
+                </div>
+                <div class="hist-right">
+                  <span class="hist-user">${data.staff_member||'USER'}</span>
+                  <span class="hist-badge ${isM?'badge-match':'badge-clean'}">${isM?'MATCH':'CLEAN'}</span>
+                </div>
+              </div>`;
+      });
+      document.getElementById('historyLogs').innerHTML =
+        h || '<p class="no-hist">No searches yet...</p>';
+    });
+}
+
+async function uploadToCloud() {
+  const raw   = document.getElementById('bulkInput').value;
+  const names = raw.split('\n').map(n=>n.trim()).filter(n=>n.length>1);
+  if (!names.length) { alert('No valid names found.'); return; }
+
+  const btn = document.getElementById('uploadBtn');
+  btn.textContent = 'UPLOADING...';
+  btn.disabled = true;
+
+  try {
+    let added = 0;
+    for (let i=0; i<names.length; i+=499) {
+      const chunk = names.slice(i, i+499);
+      const batch = db.batch();
+      chunk.forEach(n => {
+        const ref = db.collection('dnc_names').doc();
+        batch.set(ref, { name: n, name_clean: cleanName(n) });
+      });
+      await batch.commit();
+      added += chunk.length;
+    }
+    alert('✅ Synced ' + added + ' names to cloud!');
+    document.getElementById('bulkInput').value = '';
+  } catch(err) {
+    alert('❌ Upload failed: ' + err.message);
+  }
+
+  btn.textContent = 'SYNC TO CLOUD';
+  btn.disabled = false;
+}
+
+async function wipeDatabase() {
+  if (!confirm('⚠️ DELETE ENTIRE DNC DATABASE?\nThis cannot be undone!')) return;
+  const c = prompt('Type DELETE to confirm:');
+  if (c !== 'DELETE') { alert('Cancelled.'); return; }
+
+  try {
+    let deleted = 0;
+    while (true) {
+      const snap = await db.collection('dnc_names').limit(499).get();
+      if (snap.empty) break;
+      const batch = db.batch();
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      deleted += snap.size;
+    }
+    alert('✅ Deleted ' + deleted + ' records.');
+  } catch(err) {
+    alert('❌ Error: ' + err.message);
+  }
+}
+</script>
 </body>
 </html>
