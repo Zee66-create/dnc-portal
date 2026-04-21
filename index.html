@@ -1,214 +1,1022 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCC | DNC Cloud Portal</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
-    
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, onSnapshot, writeBatch, doc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCC | DNC Litigator Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;600;700;800;900&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 
-        // --- 1. CONFIGURATION ---
-        const firebaseConfig = {
-            apiKey: "AIzaSyAhqD4MPcFfiNAPakwnP6LSgcYPca-c4hg",
-            authDomain: "mcc-dnc-portal-4bc1a.firebaseapp.com",
-            projectId: "mcc-dnc-portal-4bc1a",
-            storageBucket: "mcc-dnc-portal-4bc1a.firebasestorage.app",
-            messagingSenderId: "647629631979",
-            appId: "1:647629631979:web:389e484050ea08863a29ae",
-            measurementId: "G-24G5F9TM5T"
-        };
+<!-- Firebase modular SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import {
+  getFirestore, collection, addDoc, getDocs, query, where,
+  orderBy, limit, onSnapshot, writeBatch, doc, getDoc, setDoc, deleteDoc, increment
+} from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
-        const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
+// ══════════════════════════════════════════
+//  FIREBASE CONFIG
+// ══════════════════════════════════════════
+const firebaseConfig = {
+  apiKey: "AIzaSyAhqD4MPcFfiNAPakwnP6LSgcYPca-c4hg",
+  authDomain: "mcc-dnc-portal-4bc1a.firebaseapp.com",
+  projectId: "mcc-dnc-portal-4bc1a",
+  storageBucket: "mcc-dnc-portal-4bc1a.firebasestorage.app",
+  messagingSenderId: "647629631979",
+  appId: "1:647629631979:web:389e484050ea08863a29ae"
+};
 
-        // --- 2. AUTH LOGIC ---
-        window.handleLogin = () => {
-            const u = document.getElementById('user').value.toLowerCase();
-            const p = document.getElementById('pass').value;
-            if(u === "admin" && p === "admin123") showPage(true, "ADMIN");
-            else if (u === "staff" && p === "staff123") showPage(false, "STAFF");
-            else alert("Invalid Login Credentials");
-        };
+const app = initializeApp(firebaseConfig);
+const db  = getFirestore(app);
 
-        function showPage(isAdmin, role) {
-            document.getElementById('loginSection').classList.add('hidden');
-            document.getElementById('mainApp').classList.remove('hidden');
-            document.getElementById('userBadge').innerText = role;
-            if(isAdmin) {
-                document.getElementById('adminControls').classList.remove('hidden');
-                initAdminSystem();
-            }
-        }
+// ══════════════════════════════════════════
+//  BEEP SOUND (Web Audio API — no file needed)
+// ══════════════════════════════════════════
+function playAlert() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.18, 0.36].forEach(t => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.connect(g); g.connect(ctx.destination);
+      o.type = 'square';
+      o.frequency.setValueAtTime(880, ctx.currentTime + t);
+      g.gain.setValueAtTime(0.3, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.15);
+      o.start(ctx.currentTime + t);
+      o.stop(ctx.currentTime + t + 0.15);
+    });
+  } catch(e) {}
+}
 
-        // --- 3. THE "FIXED" SEARCH LOGIC ---
-        let typingTimer;
-        window.searchDatabase = () => {
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(async () => {
-                const raw = document.getElementById('searchBox').value;
-                const clean = raw.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
-                const box = document.getElementById('statusBox');
+function playClean() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.type = 'sine';
+    o.frequency.setValueAtTime(523, ctx.currentTime);
+    o.frequency.setValueAtTime(659, ctx.currentTime + 0.1);
+    g.gain.setValueAtTime(0.2, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    o.start(ctx.currentTime);
+    o.stop(ctx.currentTime + 0.3);
+  } catch(e) {}
+}
 
-                if(clean.length < 2) { 
-                    box.classList.add('hidden'); 
-                    return; 
-                }
+// ══════════════════════════════════════════
+//  TIMEZONE SETTINGS (editable by admin)
+// ══════════════════════════════════════════
+let tzSettings = {
+  tz1: { label: 'EST', zone: 'America/New_York' },
+  tz2: { label: 'PST', zone: 'America/Los_Angeles' }
+};
 
-                // Query Firebase
-                const q = query(collection(db, "dnc_names"), where("name_clean", "==", clean), limit(1));
-                const snap = await getDocs(q);
-                const isMatch = !snap.empty;
+// Load saved tz from Firestore
+async function loadTzSettings() {
+  try {
+    const snap = await getDoc(doc(db, '_meta', 'settings'));
+    if (snap.exists() && snap.data().tzSettings) {
+      tzSettings = snap.data().tzSettings;
+    }
+  } catch(e) {}
+  startClock();
+}
 
-                // Log search to history
-                await addDoc(collection(db, "search_history"), {
-                    searched_name: clean,
-                    was_match: isMatch,
-                    staff_member: document.getElementById('userBadge').innerText || "User",
-                    timestamp: new Date()
-                });
+async function saveTzSettings() {
+  const l1 = document.getElementById('tz1Label').value.trim() || 'TZ1';
+  const z1 = document.getElementById('tz1Zone').value.trim()  || 'America/New_York';
+  const l2 = document.getElementById('tz2Label').value.trim() || 'TZ2';
+  const z2 = document.getElementById('tz2Zone').value.trim()  || 'America/Los_Angeles';
+  tzSettings = { tz1:{label:l1,zone:z1}, tz2:{label:l2,zone:z2} };
+  try {
+    await setDoc(doc(db,'_meta','settings'), { tzSettings }, { merge:true });
+  } catch(e) {}
+  document.getElementById('tzModal').classList.add('hidden');
+}
 
-                // FORCE the box to show
-                box.classList.remove('hidden');
+function startClock() {
+  clearInterval(window._clockInterval);
+  window._clockInterval = setInterval(() => {
+    const now = new Date();
+    const fmt  = tz => now.toLocaleTimeString('en-US', { timeZone:tz, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+    const fmtD = tz => now.toLocaleDateString('en-US', { timeZone:tz, weekday:'short', month:'short', day:'numeric' });
+    const el1t = document.getElementById('clock1time');
+    const el1d = document.getElementById('clock1date');
+    const el2t = document.getElementById('clock2time');
+    const el2d = document.getElementById('clock2date');
+    const el1l = document.getElementById('clock1label');
+    const el2l = document.getElementById('clock2label');
+    if(el1t) { el1t.textContent = fmt(tzSettings.tz1.zone);  el1d.textContent = fmtD(tzSettings.tz1.zone); el1l.textContent = tzSettings.tz1.label; }
+    if(el2t) { el2t.textContent = fmt(tzSettings.tz2.zone);  el2d.textContent = fmtD(tzSettings.tz2.zone); el2l.textContent = tzSettings.tz2.label; }
+  }, 1000);
+}
 
-                if(isMatch) {
-                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-red-50 border-red-500 text-red-900 shadow-2xl transition-all block";
-                    document.getElementById('statusTitle').innerText = "LITIGATOR MATCH";
-                    document.getElementById('statusIcon').className = "fas fa-skull-crossbones text-7xl mb-4 text-red-600";
-                } else {
-                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-green-50 border-green-500 text-green-900 shadow-2xl transition-all block";
-                    document.getElementById('statusTitle').innerText = "CLEAN";
-                    document.getElementById('statusIcon').className = "fas fa-check-circle text-7xl mb-4 text-green-600";
-                }
-            }, 400); 
-        };
+// ══════════════════════════════════════════
+//  AUTH
+// ══════════════════════════════════════════
+let currentUser = null;
+let currentRole = null;
 
-        // --- 4. ADMIN DASHBOARD SYNC ---
-        function initAdminSystem() {
-            // Live Counter
-            onSnapshot(collection(db, "dnc_names"), s => {
-                document.getElementById('countDisplay').innerText = s.size.toLocaleString();
-            });
+window.handleLogin = () => {
+  const u = document.getElementById('loginUser').value.trim().toLowerCase();
+  const p = document.getElementById('loginPass').value;
+  const errEl = document.getElementById('loginErr');
+  if (u === 'admin' && p === 'admin123') {
+    currentUser = 'admin'; currentRole = 'ADMIN';
+    errEl.classList.add('hidden');
+    showPage(true);
+  } else if (u === 'staff' && p === 'staff123') {
+    currentUser = 'staff'; currentRole = 'STAFF';
+    errEl.classList.add('hidden');
+    showPage(false);
+  } else {
+    errEl.classList.remove('hidden');
+  }
+};
 
-            // Live Recent Activity (History)
-            const qH = query(collection(db, "search_history"), orderBy("timestamp", "desc"), limit(12));
-            onSnapshot(qH, s => {
-                let h = '';
-                s.forEach(d => {
-                    const data = d.data();
-                    const time = data.timestamp?.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || "";
-                    const color = data.was_match ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50';
-                    h += `<div class="flex justify-between items-center p-3 border-b border-slate-50">
-                            <div class="flex flex-col">
-                                <span class="text-[9px] text-slate-400 font-mono uppercase">${time}</span>
-                                <span class="font-bold text-slate-700">${data.searched_name.toUpperCase()}</span>
-                            </div>
-                            <div class="flex items-center gap-2">
-                                <span class="text-[9px] font-bold text-slate-400 italic">${data.staff_member}</span>
-                                <span class="px-3 py-1 rounded-full text-[10px] font-black ${color}">${data.was_match ? 'MATCH' : 'CLEAN'}</span>
-                            </div>
-                          </div>`;
-                });
-                document.getElementById('historyLogs').innerHTML = h || '<p class="text-center text-slate-300 py-4 italic">No activity yet</p>';
-            });
-        }
+window.handleLogout = () => {
+  currentUser = null; currentRole = null;
+  clearInterval(window._clockInterval);
+  if(window._histUnsub) window._histUnsub();
+  if(window._countUnsub) window._countUnsub();
+  document.getElementById('mainApp').classList.add('hidden');
+  document.getElementById('loginSection').classList.remove('hidden');
+  document.getElementById('loginUser').value = '';
+  document.getElementById('loginPass').value = '';
+  // Reset search
+  document.getElementById('globalSearch').value = '';
+  document.getElementById('firstNameSearch').value = '';
+  document.getElementById('lastNameSearch').value = '';
+  hideResult();
+};
 
-        // --- 5. DATA MANAGEMENT ---
-        window.uploadToCloud = async () => {
-            const raw = document.getElementById('bulkInput').value;
-            const names = raw.split('\n').filter(n => n.trim().length > 1);
-            if(names.length === 0) return;
-            
-            const batch = writeBatch(db);
-            names.forEach(n => {
-                const clean = n.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
-                const ref = doc(collection(db, "dnc_names"));
-                batch.set(ref, { name: n, name_clean: clean });
-            });
+document.getElementById('loginPass').addEventListener('keydown', e => {
+  if(e.key === 'Enter') window.handleLogin();
+});
 
-            await batch.commit();
-            alert("SUCCESS: Added " + names.length + " records to the Cloud.");
-            document.getElementById('bulkInput').value = "";
-        };
-    </script>
+function showPage(isAdmin) {
+  document.getElementById('loginSection').classList.add('hidden');
+  document.getElementById('mainApp').classList.remove('hidden');
+  document.getElementById('userBadge').textContent = currentRole;
+
+  // Show/hide admin controls
+  document.querySelectorAll('.admin-only').forEach(el => {
+    el.classList.toggle('hidden', !isAdmin);
+  });
+  // Edit clock button only for admin
+  document.getElementById('editTzBtn').classList.toggle('hidden', !isAdmin);
+
+  loadTzSettings();
+  if(isAdmin) initAdminSystem();
+}
+
+// ══════════════════════════════════════════
+//  SEARCH — unified logic
+// ══════════════════════════════════════════
+let searchTimer = null;
+
+function cleanName(s) {
+  return s.replace(/[\/\-_@]/g,"").replace(/\s+/g,' ').trim().toLowerCase();
+}
+
+async function doSearch(fullName) {
+  if(!fullName || fullName.length < 2) { hideResult(); return; }
+
+  showSpinner(true);
+
+  const q = query(
+    collection(db, 'dnc_names'),
+    where('name_clean','==', fullName),
+    limit(1)
+  );
+  const snap = await getDocs(q);
+  const isMatch = !snap.empty;
+
+  showSpinner(false);
+  renderResult(isMatch, fullName);
+
+  // Log
+  addDoc(collection(db,'search_history'),{
+    searched_name: fullName,
+    was_match: isMatch,
+    staff_member: currentRole || 'USER',
+    timestamp: new Date()
+  }).catch(()=>{});
+}
+
+// Global search box
+window.onGlobalSearch = () => {
+  clearTimeout(searchTimer);
+  const val = cleanName(document.getElementById('globalSearch').value);
+
+  // Auto-split into first/last
+  const parts = val.split(' ').filter(Boolean);
+  if(parts.length >= 2) {
+    document.getElementById('firstNameSearch').value = parts[0];
+    document.getElementById('lastNameSearch').value  = parts.slice(1).join(' ');
+  } else if(parts.length === 1) {
+    document.getElementById('firstNameSearch').value = parts[0];
+    document.getElementById('lastNameSearch').value  = '';
+  }
+
+  if(val.length < 2) { hideResult(); return; }
+  searchTimer = setTimeout(() => doSearch(val), 400);
+};
+
+// Split field search
+window.onSplitSearch = () => {
+  clearTimeout(searchTimer);
+  const first = cleanName(document.getElementById('firstNameSearch').value);
+  const last  = cleanName(document.getElementById('lastNameSearch').value);
+  const full  = [first, last].filter(Boolean).join(' ');
+
+  // Sync to global box
+  document.getElementById('globalSearch').value = [first, last].filter(Boolean).join(' ');
+
+  if(full.length < 2) { hideResult(); return; }
+  searchTimer = setTimeout(() => doSearch(full), 400);
+};
+
+function renderResult(isMatch, name) {
+  const box = document.getElementById('resultBox');
+  box.classList.remove('hidden','result-match','result-clean');
+  void box.offsetWidth; // force reflow for animation
+
+  if(isMatch) {
+    box.classList.add('result-match');
+    document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-skull-crossbones"></i>';
+    document.getElementById('resultTitle').textContent = 'LITIGATOR MATCH';
+    document.getElementById('resultSub').textContent   = `⚠️ "${name.toUpperCase()}" is on the DNC list`;
+    playAlert();
+    // Flash screen
+    document.body.classList.add('flash-red');
+    setTimeout(()=> document.body.classList.remove('flash-red'), 600);
+  } else {
+    box.classList.add('result-clean');
+    document.getElementById('resultIcon').innerHTML  = '<i class="fas fa-shield-halved"></i>';
+    document.getElementById('resultTitle').textContent = 'CLEAN';
+    document.getElementById('resultSub').textContent   = `✓ No DNC record found for "${name.toUpperCase()}"`;
+    playClean();
+  }
+}
+
+function hideResult() {
+  document.getElementById('resultBox').classList.add('hidden');
+  document.getElementById('resultBox').classList.remove('result-match','result-clean');
+}
+
+function showSpinner(show) {
+  document.getElementById('searchSpinner').classList.toggle('hidden', !show);
+}
+
+// ══════════════════════════════════════════
+//  ADMIN SYSTEM
+// ══════════════════════════════════════════
+function initAdminSystem() {
+  // Live count
+  window._countUnsub = onSnapshot(collection(db,'dnc_names'), s => {
+    document.getElementById('countDisplay').textContent = s.size.toLocaleString();
+  });
+
+  // Live history
+  const hq = query(collection(db,'search_history'), orderBy('timestamp','desc'), limit(15));
+  window._histUnsub = onSnapshot(hq, s => {
+    let h = '';
+    s.forEach(d => {
+      const data = d.data();
+      const time = data.timestamp?.toDate().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit',second:'2-digit'}) || '';
+      const isM  = data.was_match;
+      h += `<div class="hist-row ${isM?'hist-match':'hist-clean'}">
+              <div class="hist-left">
+                <span class="hist-time">${time}</span>
+                <span class="hist-name">${(data.searched_name||'').toUpperCase()}</span>
+              </div>
+              <div class="hist-right">
+                <span class="hist-user">${data.staff_member||'USER'}</span>
+                <span class="hist-badge ${isM?'badge-match':'badge-clean'}">${isM?'MATCH':'CLEAN'}</span>
+              </div>
+            </div>`;
+    });
+    document.getElementById('historyLogs').innerHTML = h || '<p class="no-hist">No activity yet</p>';
+  });
+}
+
+window.uploadToCloud = async () => {
+  const raw = document.getElementById('bulkInput').value;
+  const names = raw.split('\n').map(n=>n.trim()).filter(n=>n.length>1);
+  if(!names.length){ alert('No names found'); return; }
+
+  const btn = document.getElementById('uploadBtn');
+  btn.textContent = 'UPLOADING...';
+  btn.disabled = true;
+
+  try {
+    const bSize = 499;
+    let added = 0;
+    for(let i=0; i<names.length; i+=bSize) {
+      const chunk = names.slice(i, i+bSize);
+      const batch = writeBatch(db);
+      chunk.forEach(n => {
+        const clean = cleanName(n);
+        const ref   = doc(collection(db,'dnc_names'));
+        batch.set(ref,{ name:n, name_clean:clean });
+      });
+      await batch.commit();
+      added += chunk.length;
+    }
+    alert(`✅ Synced ${added} names to cloud!`);
+    document.getElementById('bulkInput').value = '';
+  } catch(e) {
+    alert('❌ Upload failed: '+e.message);
+  }
+  btn.textContent = 'SYNC TO CLOUD';
+  btn.disabled = false;
+};
+
+window.wipeDatabase = async () => {
+  if(!confirm('⚠️ DELETE ENTIRE DNC DATABASE?\n\nThis cannot be undone!')) return;
+  const confirm2 = prompt('Type DELETE to confirm:');
+  if(confirm2 !== 'DELETE') { alert('Cancelled.'); return; }
+
+  try {
+    let deleted = 0;
+    while(true) {
+      const snap = await getDocs(query(collection(db,'dnc_names'), limit(499)));
+      if(snap.empty) break;
+      const batch = writeBatch(db);
+      snap.forEach(d => batch.delete(d.ref));
+      await batch.commit();
+      deleted += snap.size;
+    }
+    alert(`✅ Deleted ${deleted} records.`);
+  } catch(e) {
+    alert('❌ Error: '+e.message);
+  }
+};
+
+// Timezone modal
+window.openTzModal = () => {
+  document.getElementById('tz1Label').value = tzSettings.tz1.label;
+  document.getElementById('tz1Zone').value  = tzSettings.tz1.zone;
+  document.getElementById('tz2Label').value = tzSettings.tz2.label;
+  document.getElementById('tz2Zone').value  = tzSettings.tz2.zone;
+  document.getElementById('tzModal').classList.remove('hidden');
+};
+window.closeTzModal = () => document.getElementById('tzModal').classList.add('hidden');
+window.saveTzSettings = saveTzSettings;
+
+// Firebase connection check
+import { enableIndexedDbPersistence } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+try { await enableIndexedDbPersistence(db); } catch(e) {}
+
+</script>
+
+<style>
+:root {
+  --red:    #dc2626;
+  --red-bg: #fff1f1;
+  --red-border: #fca5a5;
+  --green:    #16a34a;
+  --green-bg: #f0fdf4;
+  --green-border: #86efac;
+  --dark: #0f172a;
+  --mid:  #1e293b;
+  --accent: #e11d48;
+}
+
+* { box-sizing:border-box; margin:0; padding:0; }
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #f1f5f9;
+  min-height: 100vh;
+  transition: background 0.3s;
+}
+
+body.flash-red {
+  animation: flashRed 0.6s ease;
+}
+@keyframes flashRed {
+  0%  { background:#fca5a5; }
+  100%{ background:#f1f5f9; }
+}
+
+/* ── LOGIN ── */
+#loginSection {
+  display:flex; align-items:center; justify-content:center;
+  min-height:100vh; padding:20px;
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+}
+.login-card {
+  background:#fff;
+  border-radius:28px;
+  padding:48px 40px;
+  width:100%; max-width:420px;
+  text-align:center;
+  box-shadow: 0 30px 80px rgba(0,0,0,0.4);
+  animation: slideUp 0.5s cubic-bezier(0.34,1.56,0.64,1);
+}
+@keyframes slideUp {
+  from { opacity:0; transform:translateY(40px) scale(0.95); }
+  to   { opacity:1; transform:translateY(0) scale(1); }
+}
+.login-card img { height:64px; margin:0 auto 20px; display:block; }
+.login-card h1 {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:32px; font-weight:900;
+  color:var(--dark); letter-spacing:-1px; margin-bottom:4px;
+}
+.login-card p { color:#94a3b8; font-size:12px; margin-bottom:32px; letter-spacing:2px; }
+.login-input {
+  width:100%; padding:14px 18px;
+  border:2px solid #e2e8f0; border-radius:14px;
+  font-size:15px; font-family:'DM Sans',sans-serif;
+  outline:none; margin-bottom:14px;
+  transition:border-color 0.2s, box-shadow 0.2s;
+  background:#f8fafc;
+}
+.login-input:focus { border-color:var(--accent); box-shadow:0 0 0 4px #fce7f3; }
+.login-btn {
+  width:100%; padding:16px;
+  background:var(--dark); color:#fff;
+  border:none; border-radius:14px;
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:20px; font-weight:800; letter-spacing:2px;
+  cursor:pointer; transition:all 0.2s;
+  margin-top:4px;
+}
+.login-btn:hover { background:var(--accent); transform:translateY(-1px); box-shadow:0 8px 24px #e11d4844; }
+.login-btn:active { transform:scale(0.98); }
+.login-err {
+  color:var(--red); font-size:13px; margin-top:12px;
+  background:#fff1f1; border:1px solid #fca5a5;
+  padding:8px 14px; border-radius:8px;
+}
+
+/* ── NAVBAR ── */
+.navbar {
+  background:#fff;
+  border-bottom:1px solid #e2e8f0;
+  padding:0 24px;
+  height:64px;
+  display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:100;
+  box-shadow:0 1px 12px rgba(0,0,0,0.06);
+}
+.navbar-left { display:flex; align-items:center; gap:14px; }
+.navbar-logo { height:36px; }
+.navbar-title {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:20px; font-weight:800; color:var(--dark); letter-spacing:1px;
+}
+.navbar-right { display:flex; align-items:center; gap:10px; }
+.user-badge {
+  background:#f1f5f9; color:#475569;
+  font-size:10px; font-weight:700; letter-spacing:2px;
+  padding:5px 14px; border-radius:100px;
+  text-transform:uppercase;
+}
+.nav-btn {
+  padding:8px 16px; border-radius:10px;
+  font-size:12px; font-weight:700; letter-spacing:1px;
+  cursor:pointer; border:none; transition:all 0.2s;
+  display:flex; align-items:center; gap:6px;
+}
+.btn-logout { background:#f1f5f9; color:#64748b; }
+.btn-logout:hover { background:#fee2e2; color:#dc2626; }
+.btn-danger { background:#fee2e2; color:#dc2626; }
+.btn-danger:hover { background:#dc2626; color:#fff; }
+
+/* ── DUAL CLOCK ── */
+.clock-bar {
+  background:var(--dark);
+  padding:12px 24px;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.clock-zones { display:flex; gap:24px; }
+.clock-zone {
+  display:flex; flex-direction:column; align-items:center;
+  padding:10px 24px; border-radius:12px;
+  background:rgba(255,255,255,0.06);
+  border:1px solid rgba(255,255,255,0.1);
+  min-width:160px;
+}
+.clock-label {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:11px; font-weight:700; letter-spacing:3px;
+  color:#64748b; text-transform:uppercase; margin-bottom:2px;
+}
+.clock-time {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:26px; font-weight:800; color:#f8fafc; letter-spacing:1px;
+  line-height:1;
+}
+.clock-date { font-size:10px; color:#475569; margin-top:2px; }
+.edit-tz-btn {
+  background:rgba(255,255,255,0.08); color:#64748b;
+  border:1px solid rgba(255,255,255,0.1);
+  padding:6px 14px; border-radius:8px;
+  font-size:11px; font-weight:700; letter-spacing:1px;
+  cursor:pointer; transition:all 0.2s;
+}
+.edit-tz-btn:hover { background:rgba(255,255,255,0.15); color:#94a3b8; }
+
+/* ── MAIN CONTENT ── */
+.main-content {
+  max-width:900px; margin:0 auto; padding:28px 20px 60px;
+  display:flex; flex-direction:column; gap:20px;
+}
+
+/* ── SEARCH CARD ── */
+.search-card {
+  background:#fff; border-radius:24px;
+  padding:36px 36px 32px;
+  border:1px solid #e2e8f0;
+  box-shadow:0 2px 20px rgba(0,0,0,0.05);
+}
+.search-card h2 {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:22px; font-weight:800; letter-spacing:3px;
+  color:var(--dark); text-align:center; margin-bottom:4px;
+  text-transform:uppercase;
+}
+.search-card p { text-align:center; color:#94a3b8; font-size:13px; margin-bottom:24px; }
+
+.global-input {
+  width:100%; padding:18px 24px;
+  font-size:22px; font-weight:600;
+  font-family:'Barlow Condensed',sans-serif;
+  letter-spacing:1px;
+  border:3px solid #e2e8f0; border-radius:16px;
+  text-align:center; outline:none;
+  background:#fafafa; color:var(--dark);
+  transition:all 0.25s;
+}
+.global-input:focus { border-color:var(--accent); box-shadow:0 0 0 5px #fce7f366; background:#fff; }
+.global-input::placeholder { color:#cbd5e1; font-weight:400; }
+
+.split-row {
+  display:grid; grid-template-columns:1fr 1fr; gap:12px;
+  margin-top:12px;
+}
+.split-field {
+  position:relative;
+}
+.split-label {
+  position:absolute; top:-9px; left:14px;
+  background:#fff; padding:0 6px;
+  font-size:10px; font-weight:700; letter-spacing:2px;
+  color:#94a3b8; text-transform:uppercase; z-index:1;
+}
+.split-input {
+  width:100%; padding:13px 18px;
+  font-size:15px; font-weight:600;
+  border:2px solid #e2e8f0; border-radius:12px;
+  outline:none; background:#fafafa; color:var(--dark);
+  transition:all 0.2s; font-family:'DM Sans',sans-serif;
+}
+.split-input:focus { border-color:#94a3b8; background:#fff; }
+
+.search-spinner {
+  text-align:center; padding:12px;
+  color:#94a3b8; font-size:13px; font-weight:500;
+  animation:pulse 1s ease infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+/* ── RESULT BOX ── */
+#resultBox {
+  border-radius:20px; padding:36px;
+  text-align:center; border-width:3px; border-style:solid;
+  margin-top:20px;
+  animation:popIn 0.35s cubic-bezier(0.34,1.56,0.64,1);
+}
+#resultBox.hidden { display:none; }
+
+@keyframes popIn {
+  from { opacity:0; transform:scale(0.85); }
+  to   { opacity:1; transform:scale(1); }
+}
+
+.result-match {
+  background:var(--red-bg) !important;
+  border-color:var(--red-border) !important;
+  animation:popIn 0.35s cubic-bezier(0.34,1.56,0.64,1), shakeBox 0.5s ease !important;
+}
+@keyframes shakeBox {
+  0%,100%{transform:translateX(0)}
+  15%{transform:translateX(-8px)}
+  30%{transform:translateX(8px)}
+  45%{transform:translateX(-5px)}
+  60%{transform:translateX(5px)}
+  75%{transform:translateX(-2px)}
+}
+.result-clean {
+  background:var(--green-bg) !important;
+  border-color:var(--green-border) !important;
+}
+
+#resultIcon i {
+  font-size:56px; margin-bottom:12px; display:block;
+}
+.result-match #resultIcon i { color:var(--red); animation:iconPulse 0.8s ease 2; }
+.result-clean #resultIcon i { color:var(--green); }
+@keyframes iconPulse {
+  0%,100%{transform:scale(1)} 50%{transform:scale(1.2)}
+}
+
+#resultTitle {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:52px; font-weight:900; letter-spacing:-1px;
+  line-height:1;
+}
+.result-match #resultTitle { color:var(--red); }
+.result-clean #resultTitle { color:var(--green); }
+
+#resultSub {
+  font-size:14px; font-weight:500; margin-top:8px;
+}
+.result-match #resultSub { color:#b91c1c; }
+.result-clean #resultSub { color:#15803d; }
+
+/* ── ADMIN CARD ── */
+.admin-card {
+  background:#fff; border-radius:24px;
+  border:1px solid #e2e8f0;
+  box-shadow:0 2px 20px rgba(0,0,0,0.05);
+  overflow:hidden;
+}
+.admin-card-header {
+  padding:18px 24px; border-bottom:1px solid #f1f5f9;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.admin-card-title {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:13px; font-weight:800; letter-spacing:3px;
+  color:#94a3b8; text-transform:uppercase;
+}
+
+/* Stats */
+.stats-grid {
+  display:grid; grid-template-columns:1fr 1fr; gap:16px;
+  padding:0;
+}
+.stat-box {
+  background:var(--dark); border-radius:20px;
+  padding:24px 28px;
+  display:flex; justify-content:space-between; align-items:center;
+}
+.stat-label {
+  font-size:10px; font-weight:700; letter-spacing:3px;
+  color:#475569; text-transform:uppercase; margin-bottom:8px;
+}
+.stat-value {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:44px; font-weight:900; color:#f8fafc;
+  line-height:1;
+}
+.stat-icon { font-size:24px; opacity:0.4; }
+.live-dot {
+  display:inline-block; width:8px; height:8px;
+  border-radius:50%; background:#22c55e;
+  animation:livePulse 1.5s ease infinite;
+  margin-right:8px;
+}
+@keyframes livePulse {
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:0.3;transform:scale(0.7)}
+}
+.live-text {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:14px; font-weight:700; color:#22c55e; letter-spacing:2px;
+}
+
+/* History */
+.hist-row {
+  display:flex; justify-content:space-between; align-items:center;
+  padding:11px 24px; border-bottom:1px solid #f8fafc;
+  transition:background 0.15s;
+}
+.hist-row:hover { background:#fafafa; }
+.hist-match { border-left:3px solid #fca5a5; }
+.hist-clean { border-left:3px solid #86efac; }
+.hist-left { display:flex; flex-direction:column; gap:1px; }
+.hist-time { font-size:10px; color:#94a3b8; font-family:monospace; }
+.hist-name { font-size:14px; font-weight:700; color:var(--dark); }
+.hist-right { display:flex; align-items:center; gap:10px; }
+.hist-user { font-size:10px; color:#94a3b8; font-weight:600; letter-spacing:1px; }
+.hist-badge {
+  font-size:9px; font-weight:800; letter-spacing:1.5px;
+  padding:3px 10px; border-radius:100px;
+}
+.badge-match { background:#fee2e2; color:#dc2626; }
+.badge-clean { background:#dcfce7; color:#16a34a; }
+.no-hist { text-align:center; padding:32px; color:#cbd5e1; font-size:13px; }
+
+/* Bulk upload */
+.upload-card {
+  background:var(--dark); border-radius:24px; padding:28px;
+}
+.upload-title {
+  font-size:11px; font-weight:700; letter-spacing:3px;
+  color:#475569; text-transform:uppercase; margin-bottom:4px;
+}
+.upload-sub { font-size:12px; color:#334155; margin-bottom:16px; }
+.upload-ta {
+  width:100%; height:140px; padding:16px;
+  background:#0f172a; border:1px solid #1e293b;
+  border-radius:14px; color:#e2e8f0;
+  font-family:monospace; font-size:13px; line-height:1.6;
+  outline:none; resize:none;
+  transition:border-color 0.2s;
+}
+.upload-ta:focus { border-color:#475569; }
+.upload-ta::placeholder { color:#334155; }
+.upload-actions { display:flex; gap:10px; margin-top:12px; }
+.btn-upload {
+  flex:1; padding:14px;
+  background:var(--accent); color:#fff;
+  border:none; border-radius:12px;
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:18px; font-weight:800; letter-spacing:2px;
+  cursor:pointer; transition:all 0.2s;
+}
+.btn-upload:hover { background:#be123c; }
+.btn-upload:disabled { opacity:0.5; cursor:not-allowed; }
+.btn-wipe {
+  padding:14px 20px;
+  background:#1e293b; color:#ef4444;
+  border:1px solid #ef444422; border-radius:12px;
+  font-size:14px; cursor:pointer; transition:all 0.2s;
+}
+.btn-wipe:hover { background:#ef4444; color:#fff; }
+
+/* ── TZ MODAL ── */
+.modal-overlay {
+  position:fixed; inset:0; z-index:999;
+  background:rgba(0,0,0,0.6);
+  display:flex; align-items:center; justify-content:center;
+  backdrop-filter:blur(4px);
+}
+.modal-overlay.hidden { display:none; }
+.modal-box {
+  background:#fff; border-radius:24px; padding:36px;
+  width:100%; max-width:460px;
+  box-shadow:0 30px 80px rgba(0,0,0,0.3);
+  animation:slideUp 0.3s ease;
+}
+.modal-title {
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:24px; font-weight:900; color:var(--dark);
+  margin-bottom:4px;
+}
+.modal-sub { font-size:12px; color:#94a3b8; margin-bottom:24px; }
+.modal-grid { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-bottom:12px; }
+.modal-label { font-size:11px; font-weight:700; color:#64748b; letter-spacing:1px; text-transform:uppercase; margin-bottom:4px; }
+.modal-input {
+  width:100%; padding:10px 14px;
+  border:2px solid #e2e8f0; border-radius:10px;
+  font-size:14px; outline:none; font-family:'DM Sans',sans-serif;
+}
+.modal-input:focus { border-color:var(--accent); }
+.modal-hint { font-size:11px; color:#94a3b8; margin-bottom:20px; line-height:1.5; }
+.modal-actions { display:flex; gap:10px; }
+.btn-save {
+  flex:1; padding:12px;
+  background:var(--dark); color:#fff;
+  border:none; border-radius:10px;
+  font-family:'Barlow Condensed',sans-serif;
+  font-size:17px; font-weight:800; letter-spacing:1px;
+  cursor:pointer; transition:all 0.2s;
+}
+.btn-save:hover { background:var(--accent); }
+.btn-cancel {
+  padding:12px 20px;
+  background:#f1f5f9; color:#64748b;
+  border:none; border-radius:10px;
+  font-size:14px; font-weight:600;
+  cursor:pointer; transition:all 0.2s;
+}
+.btn-cancel:hover { background:#e2e8f0; }
+
+/* ── RESPONSIVE ── */
+@media(max-width:600px){
+  .split-row { grid-template-columns:1fr; }
+  .stats-grid { grid-template-columns:1fr; }
+  .clock-zones { gap:10px; }
+  .clock-zone { min-width:120px; padding:8px 14px; }
+  .clock-time { font-size:20px; }
+  .main-content { padding:16px 14px 40px; }
+  .search-card { padding:24px 18px; }
+  .global-input { font-size:18px; }
+}
+</style>
 </head>
-<body class="bg-[#f8fafc] min-h-screen font-sans antialiased">
+<body>
 
-    <div id="loginSection" class="flex items-center justify-center min-h-screen p-6">
-        <div class="bg-white p-12 rounded-[50px] shadow-2xl w-full max-w-md text-center border-t-[12px] border-slate-900">
-            <img src="logo.png" alt="Logo" class="h-20 mx-auto mb-8">
-            <h1 class="text-3xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">MCC Portal</h1>
-            <p class="text-slate-400 text-[10px] mb-10 tracking-[0.2em] uppercase font-bold">Cloud Sync Intelligence</p>
-            <input type="text" id="user" placeholder="Username" class="w-full p-5 mb-4 border-2 rounded-2xl outline-none focus:border-blue-500 bg-slate-50 font-bold transition-all">
-            <input type="password" id="pass" placeholder="Password" class="w-full p-5 mb-8 border-2 rounded-2xl outline-none focus:border-blue-500 bg-slate-50 font-bold transition-all">
-            <button onclick="handleLogin()" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black hover:bg-blue-600 transition-all shadow-lg active:scale-95">ACCESS SYSTEM</button>
+<!-- ══════════════ LOGIN ══════════════ -->
+<div id="loginSection">
+  <div class="login-card">
+    <img src="logo.png" alt="MCC" onerror="this.style.display='none'">
+    <h1>MCC Portal</h1>
+    <p>AUTHORIZED PERSONNEL ONLY</p>
+    <input type="text"     id="loginUser" class="login-input" placeholder="Username" autocomplete="off">
+    <input type="password" id="loginPass" class="login-input" placeholder="Password">
+    <button class="login-btn" onclick="handleLogin()">ACCESS SYSTEM</button>
+    <div id="loginErr" class="login-err hidden">❌ Invalid credentials</div>
+  </div>
+</div>
+
+<!-- ══════════════ MAIN APP ══════════════ -->
+<div id="mainApp" class="hidden">
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="navbar-left">
+      <img src="logo.png" alt="MCC" class="navbar-logo" onerror="this.style.display='none'">
+      <span class="navbar-title">DNC PORTAL</span>
+    </div>
+    <div class="navbar-right">
+      <span class="user-badge" id="userBadge">STAFF</span>
+      <!-- Admin: delete data button -->
+      <button class="nav-btn btn-danger admin-only hidden" onclick="wipeDatabase()" title="Delete all DNC data">
+        <i class="fas fa-trash-can"></i> DELETE DATA
+      </button>
+      <!-- Logout -->
+      <button class="nav-btn btn-logout" onclick="handleLogout()">
+        <i class="fas fa-right-from-bracket"></i> LOGOUT
+      </button>
+    </div>
+  </nav>
+
+  <!-- Dual Clock Bar -->
+  <div class="clock-bar">
+    <div class="clock-zones">
+      <div class="clock-zone">
+        <div class="clock-label" id="clock1label">EST</div>
+        <div class="clock-time"  id="clock1time">--:--:--</div>
+        <div class="clock-date"  id="clock1date">---</div>
+      </div>
+      <div class="clock-zone">
+        <div class="clock-label" id="clock2label">PST</div>
+        <div class="clock-time"  id="clock2time">--:--:--</div>
+        <div class="clock-date"  id="clock2date">---</div>
+      </div>
+    </div>
+    <!-- Edit button — admin only -->
+    <button class="edit-tz-btn admin-only hidden" id="editTzBtn" onclick="openTzModal()">
+      <i class="fas fa-pen-to-square"></i> EDIT ZONES
+    </button>
+  </div>
+
+  <!-- Main Content -->
+  <div class="main-content">
+
+    <!-- ── SEARCH CARD ── -->
+    <div class="search-card">
+      <h2>Name Verification Scrub</h2>
+      <p>Type a name below — result appears instantly</p>
+
+      <!-- Global search -->
+      <input
+        type="text" id="globalSearch"
+        class="global-input"
+        placeholder="Type full name here..."
+        oninput="onGlobalSearch()"
+        autocomplete="off"
+      >
+
+      <!-- Split first / last -->
+      <div class="split-row">
+        <div class="split-field">
+          <div class="split-label">First Name</div>
+          <input type="text" id="firstNameSearch" class="split-input"
+            placeholder="First" oninput="onSplitSearch()" autocomplete="off">
         </div>
+        <div class="split-field">
+          <div class="split-label">Last Name</div>
+          <input type="text" id="lastNameSearch" class="split-input"
+            placeholder="Last" oninput="onSplitSearch()" autocomplete="off">
+        </div>
+      </div>
+
+      <!-- Spinner -->
+      <div id="searchSpinner" class="search-spinner hidden">
+        <i class="fas fa-circle-notch fa-spin"></i> Searching database...
+      </div>
+
+      <!-- Result Box -->
+      <div id="resultBox" class="hidden">
+        <div id="resultIcon"></div>
+        <div id="resultTitle"></div>
+        <div id="resultSub"></div>
+      </div>
     </div>
 
-    <div id="mainApp" class="hidden">
-        <nav class="bg-white p-5 border-b flex justify-between items-center sticky top-0 z-50">
-            <img src="logo.png" class="h-10">
-            <div class="flex items-center gap-4">
-                <span id="userBadge" class="bg-slate-100 px-4 py-1.5 rounded-full text-[11px] font-black text-slate-500 uppercase tracking-tight"></span>
-                <button onclick="location.reload()" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-power-off"></i></button>
-            </div>
-        </nav>
+    <!-- ── ADMIN CONTROLS ── -->
+    <div class="admin-only hidden" id="adminControls">
 
-        <div class="max-w-4xl mx-auto p-8">
-            <div class="bg-white p-12 rounded-[45px] border shadow-sm text-center">
-                <h2 class="text-2xl font-black text-slate-800 mb-8 uppercase tracking-widest italic">Verification Scrub</h2>
-                <div class="relative max-w-2xl mx-auto">
-                    <input type="text" id="searchBox" onkeyup="searchDatabase()" placeholder="Type or Paste Full Name..." 
-                        class="w-full p-6 text-3xl border-4 border-slate-100 rounded-3xl text-center font-bold bg-[#fcfdff] focus:border-blue-500 focus:bg-white outline-none text-slate-700 transition-all">
-                </div>
-                
-                <div id="statusBox" class="hidden animate-bounce mt-10">
-                    <i id="statusIcon"></i>
-                    <h3 id="statusTitle" class="text-5xl font-black italic tracking-tighter"></h3>
-                </div>
-            </div>
-
-            <div id="adminControls" class="hidden mt-10 space-y-8">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div class="bg-slate-900 p-8 rounded-[40px] text-white shadow-xl">
-                        <p class="text-slate-400 text-[11px] font-black uppercase tracking-widest">Master Cloud Records</p>
-                        <h4 id="countDisplay" class="text-5xl font-black italic mt-1">...</h4>
-                    </div>
-                    <div class="bg-slate-900 p-8 rounded-[40px] text-white shadow-xl flex flex-col justify-center">
-                        <p class="text-slate-400 text-[11px] font-black uppercase tracking-widest">Connection</p>
-                        <h4 class="text-sm font-black text-green-400 flex items-center gap-3 mt-4">
-                            <span class="h-3 w-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_#22c55e]"></span> 
-                            FIREBASE LIVE SYNC
-                        </h4>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-[40px] border shadow-sm p-8">
-                    <p class="text-[11px] font-black text-slate-300 mb-6 uppercase tracking-widest">Recent Activity Stream</p>
-                    <div id="historyLogs" class="space-y-1"></div>
-                </div>
-
-                <div class="bg-slate-900 p-10 rounded-[50px] text-white shadow-2xl">
-                    <div class="flex justify-between items-center mb-6">
-                        <p class="text-slate-400 text-xs font-bold uppercase tracking-widest italic">Database Bulk Upload</p>
-                        <span class="text-[10px] bg-slate-800 px-3 py-1 rounded-full text-slate-500 font-mono">Firestore v10.7</span>
-                    </div>
-                    <textarea id="bulkInput" placeholder="Paste names here (one per line)..." 
-                        class="w-full h-56 p-6 bg-slate-800 border-none rounded-3xl mb-6 outline-none text-slate-200 font-mono focus:ring-2 focus:ring-blue-500 transition-all"></textarea>
-                    <button onclick="uploadToCloud()" class="w-full bg-blue-600 p-6 rounded-2xl font-black text-xl hover:bg-blue-500 transition-all shadow-xl active:scale-95 uppercase italic">Push to Master List</button>
-                </div>
-            </div>
+      <!-- Stats -->
+      <div class="stats-grid" style="margin-bottom:16px;">
+        <div class="stat-box">
+          <div>
+            <div class="stat-label">DNC Records</div>
+            <div class="stat-value" id="countDisplay">...</div>
+          </div>
+          <i class="fas fa-database stat-icon" style="color:#60a5fa;"></i>
         </div>
+        <div class="stat-box">
+          <div>
+            <div class="stat-label">Firebase Status</div>
+            <div style="margin-top:8px;">
+              <span class="live-dot"></span>
+              <span class="live-text">SYNCING LIVE</span>
+            </div>
+          </div>
+          <i class="fas fa-bolt stat-icon" style="color:#facc15;"></i>
+        </div>
+      </div>
+
+      <!-- History -->
+      <div class="admin-card" style="margin-bottom:16px;">
+        <div class="admin-card-header">
+          <span class="admin-card-title">Recent Search Activity</span>
+          <span style="font-size:10px;color:#e11d48;font-weight:700;letter-spacing:1px;">REAL-TIME</span>
+        </div>
+        <div id="historyLogs">
+          <p class="no-hist">No searches yet...</p>
+        </div>
+      </div>
+
+      <!-- Bulk Upload -->
+      <div class="upload-card">
+        <div class="upload-title">Update Master List</div>
+        <div class="upload-sub">One name per line — syncs to cloud instantly</div>
+        <textarea id="bulkInput" class="upload-ta"
+          placeholder="John Smith&#10;Jane Doe&#10;Bob Johnson..."></textarea>
+        <div class="upload-actions">
+          <button id="uploadBtn" class="btn-upload" onclick="uploadToCloud()">
+            SYNC TO CLOUD
+          </button>
+          <button class="btn-wipe" onclick="wipeDatabase()" title="Wipe database">
+            <i class="fas fa-trash-can"></i>
+          </button>
+        </div>
+      </div>
+
+    </div><!-- /admin-only -->
+
+  </div><!-- /main-content -->
+</div><!-- /mainApp -->
+
+<!-- ══════════════ TIMEZONE MODAL ══════════════ -->
+<div class="modal-overlay hidden" id="tzModal" onclick="if(event.target===this)closeTzModal()">
+  <div class="modal-box">
+    <div class="modal-title">Edit Clock Zones</div>
+    <div class="modal-sub">Set timezone labels and IANA zone names for the dual clock</div>
+
+    <div style="margin-bottom:16px;">
+      <div class="modal-label">Zone 1</div>
+      <div class="modal-grid">
+        <div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Label</div>
+          <input type="text" id="tz1Label" class="modal-input" placeholder="EST">
+        </div>
+        <div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">IANA Timezone</div>
+          <input type="text" id="tz1Zone"  class="modal-input" placeholder="America/New_York">
+        </div>
+      </div>
     </div>
 
-    <script>
-        // Fallback to ensure standard icons load
-        window.addEventListener('load', () => {
-            console.log("Portal Initialized");
-        });
-    </script>
+    <div style="margin-bottom:16px;">
+      <div class="modal-label">Zone 2</div>
+      <div class="modal-grid">
+        <div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Label</div>
+          <input type="text" id="tz2Label" class="modal-input" placeholder="PST">
+        </div>
+        <div>
+          <div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">IANA Timezone</div>
+          <input type="text" id="tz2Zone"  class="modal-input" placeholder="America/Los_Angeles">
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-hint">
+      Examples: <code>America/New_York</code> · <code>America/Chicago</code> · <code>America/Los_Angeles</code> · <code>America/Denver</code> · <code>Europe/London</code> · <code>Asia/Kolkata</code>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeTzModal()">Cancel</button>
+      <button class="btn-save"   onclick="saveTzSettings()">SAVE ZONES</button>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
