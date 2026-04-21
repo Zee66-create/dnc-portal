@@ -3,23 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MCC | Cloud Sync Portal</title>
+    <title>MCC | DNC Cloud Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     
-    <style>
-        @keyframes slideUp {
-            0% { transform: translateY(20px); opacity: 0; }
-            100% { transform: translateY(0); opacity: 1; }
-        }
-        .animate-pop { animation: slideUp 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-        .clock-glass { background: rgba(255, 255, 255, 0.05); backdrop-filter: blur(10px); }
-    </style>
-
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
-        import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, onSnapshot, writeBatch, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDocs, query, where, orderBy, limit, onSnapshot, writeBatch, doc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
+        // --- 1. CONFIGURATION ---
         const firebaseConfig = {
             apiKey: "AIzaSyAhqD4MPcFfiNAPakwnP6LSgcYPca-c4hg",
             authDomain: "mcc-dnc-portal-4bc1a.firebaseapp.com",
@@ -33,187 +25,190 @@
         const app = initializeApp(firebaseConfig);
         const db = getFirestore(app);
 
-        // --- CLOCK LOGIC ---
-        function updateClocks() {
-            const options = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
-            document.querySelectorAll('.clock-local').forEach(el => el.innerText = new Date().toLocaleTimeString('en-US', options));
-            document.querySelectorAll('.clock-est').forEach(el => {
-                el.innerText = new Date().toLocaleTimeString('en-US', { ...options, timeZone: 'America/New_York' });
-            });
-        }
-        setInterval(updateClocks, 1000);
-
-        // --- AUTH ---
+        // --- 2. AUTH LOGIC ---
         window.handleLogin = () => {
             const u = document.getElementById('user').value.toLowerCase();
             const p = document.getElementById('pass').value;
             if(u === "admin" && p === "admin123") showPage(true, "ADMIN");
             else if (u === "staff" && p === "staff123") showPage(false, "STAFF");
-            else alert("Invalid Login");
+            else alert("Invalid Login Credentials");
         };
 
         function showPage(isAdmin, role) {
             document.getElementById('loginSection').classList.add('hidden');
             document.getElementById('mainApp').classList.remove('hidden');
             document.getElementById('userBadge').innerText = role;
-            if(isAdmin) document.getElementById('adminControls').classList.remove('hidden');
-            initDataSync();
+            if(isAdmin) {
+                document.getElementById('adminControls').classList.remove('hidden');
+                initAdminSystem();
+            }
         }
 
-        // --- SEARCH ENGINE (SPLIT LOGIC) ---
-        window.runGlobalSearch = async () => {
-            const val = document.getElementById('globalSearch').value.trim();
-            const box = document.getElementById('statusBox');
-            
-            // Auto-Split First and Last Name
-            const parts = val.split(' ');
-            const first = parts[0] || "";
-            const last = parts.slice(1).join(' ') || "";
-            
-            document.getElementById('displayFirst').value = first.toUpperCase();
-            document.getElementById('displayLast').value = last.toUpperCase();
+        // --- 3. THE "FIXED" SEARCH LOGIC ---
+        let typingTimer;
+        window.searchDatabase = () => {
+            clearTimeout(typingTimer);
+            typingTimer = setTimeout(async () => {
+                const raw = document.getElementById('searchBox').value;
+                const clean = raw.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
+                const box = document.getElementById('statusBox');
 
-            if (val.length < 2) { box.classList.add('hidden'); return; }
+                if(clean.length < 2) { 
+                    box.classList.add('hidden'); 
+                    return; 
+                }
 
-            const clean = val.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
-            const q = query(collection(db, "dnc_names"), where("name_clean", "==", clean), limit(1));
-            const snap = await getDocs(q);
-            const isMatch = !snap.empty;
+                // Query Firebase
+                const q = query(collection(db, "dnc_names"), where("name_clean", "==", clean), limit(1));
+                const snap = await getDocs(q);
+                const isMatch = !snap.empty;
 
-            box.classList.remove('hidden');
-            if(isMatch) {
-                box.className = "mt-6 p-10 rounded-[40px] border-4 bg-red-50 border-red-500 text-red-700 animate-pop block";
-                document.getElementById('statusIcon').className = "fas fa-user-slash text-6xl mb-4";
-                document.getElementById('statusTitle').innerText = "LITIGATOR MATCH";
-                document.getElementById('statusSub').innerText = `DNC Match found for "${val}"`;
-            } else {
-                box.className = "mt-6 p-10 rounded-[40px] border-4 bg-green-50 border-green-500 text-green-700 animate-pop block";
-                document.getElementById('statusIcon').className = "fas fa-check-circle text-6xl mb-4";
-                document.getElementById('statusTitle').innerText = "CLEAN";
-                document.getElementById('statusSub').innerText = `No match found for "${val}"`;
-            }
+                // Log search to history
+                await addDoc(collection(db, "search_history"), {
+                    searched_name: clean,
+                    was_match: isMatch,
+                    staff_member: document.getElementById('userBadge').innerText || "User",
+                    timestamp: new Date()
+                });
 
-            // Log Search
-            await addDoc(collection(db, "search_history"), {
-                name: val, match: isMatch, user: document.getElementById('userBadge').innerText, time: new Date()
+                // FORCE the box to show
+                box.classList.remove('hidden');
+
+                if(isMatch) {
+                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-red-50 border-red-500 text-red-900 shadow-2xl transition-all block";
+                    document.getElementById('statusTitle').innerText = "LITIGATOR MATCH";
+                    document.getElementById('statusIcon').className = "fas fa-skull-crossbones text-7xl mb-4 text-red-600";
+                } else {
+                    box.className = "mt-8 p-12 rounded-[40px] border-8 bg-green-50 border-green-500 text-green-900 shadow-2xl transition-all block";
+                    document.getElementById('statusTitle').innerText = "CLEAN";
+                    document.getElementById('statusIcon').className = "fas fa-check-circle text-7xl mb-4 text-green-600";
+                }
+            }, 400); 
+        };
+
+        // --- 4. ADMIN DASHBOARD SYNC ---
+        function initAdminSystem() {
+            // Live Counter
+            onSnapshot(collection(db, "dnc_names"), s => {
+                document.getElementById('countDisplay').innerText = s.size.toLocaleString();
             });
-        };
 
-        // --- ADMIN: DELETE SYNCED DATA ---
-        window.purgeDatabase = async () => {
-            if(!confirm("ARE YOU SURE? This will delete ALL synced records.")) return;
-            const snap = await getDocs(collection(db, "dnc_names"));
-            const batch = writeBatch(db);
-            snap.forEach(d => batch.delete(d.ref));
-            await batch.commit();
-            alert("Database Cleared Successfully.");
-        };
-
-        function initDataSync() {
-            onSnapshot(collection(db, "dnc_names"), s => document.getElementById('countDisplay').innerText = s.size.toLocaleString());
-            const qH = query(collection(db, "search_history"), orderBy("time", "desc"), limit(8));
+            // Live Recent Activity (History)
+            const qH = query(collection(db, "search_history"), orderBy("timestamp", "desc"), limit(12));
             onSnapshot(qH, s => {
                 let h = '';
                 s.forEach(d => {
                     const data = d.data();
-                    h += `<div class="flex justify-between p-3 border-b text-sm">
-                            <span class="font-bold text-slate-600">${data.name.toUpperCase()}</span>
-                            <span class="font-black ${data.match ? 'text-red-500' : 'text-green-500'}">${data.match ? 'MATCH' : 'CLEAN'}</span>
+                    const time = data.timestamp?.toDate().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || "";
+                    const color = data.was_match ? 'text-red-500 bg-red-50' : 'text-green-600 bg-green-50';
+                    h += `<div class="flex justify-between items-center p-3 border-b border-slate-50">
+                            <div class="flex flex-col">
+                                <span class="text-[9px] text-slate-400 font-mono uppercase">${time}</span>
+                                <span class="font-bold text-slate-700">${data.searched_name.toUpperCase()}</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-[9px] font-bold text-slate-400 italic">${data.staff_member}</span>
+                                <span class="px-3 py-1 rounded-full text-[10px] font-black ${color}">${data.was_match ? 'MATCH' : 'CLEAN'}</span>
+                            </div>
                           </div>`;
                 });
-                document.getElementById('historyLogs').innerHTML = h;
+                document.getElementById('historyLogs').innerHTML = h || '<p class="text-center text-slate-300 py-4 italic">No activity yet</p>';
             });
         }
 
+        // --- 5. DATA MANAGEMENT ---
         window.uploadToCloud = async () => {
             const raw = document.getElementById('bulkInput').value;
             const names = raw.split('\n').filter(n => n.trim().length > 1);
+            if(names.length === 0) return;
+            
             const batch = writeBatch(db);
             names.forEach(n => {
                 const clean = n.replace(/[/\-_@]/g, "").replace(/\s+/g, ' ').trim().toLowerCase();
-                batch.set(doc(collection(db, "dnc_names")), { name: n, name_clean: clean });
+                const ref = doc(collection(db, "dnc_names"));
+                batch.set(ref, { name: n, name_clean: clean });
             });
+
             await batch.commit();
+            alert("SUCCESS: Added " + names.length + " records to the Cloud.");
             document.getElementById('bulkInput').value = "";
-            alert("Synced " + names.length + " Names.");
         };
     </script>
 </head>
-<body class="bg-slate-50 min-h-screen">
+<body class="bg-[#f8fafc] min-h-screen font-sans antialiased">
 
-    <div id="loginSection" class="flex items-center justify-center min-h-screen">
-        <div class="bg-white p-12 rounded-[50px] shadow-2xl w-full max-w-sm text-center border-b-8 border-slate-900">
-            <img src="logo.png" class="h-16 mx-auto mb-8">
-            <input type="text" id="user" placeholder="User" class="w-full p-4 mb-4 bg-slate-50 rounded-2xl outline-none font-bold border">
-            <input type="password" id="pass" placeholder="Pass" class="w-full p-4 mb-8 bg-slate-50 rounded-2xl outline-none font-bold border">
-            <button onclick="handleLogin()" class="w-full bg-slate-900 text-white p-4 rounded-2xl font-black text-lg">LOGIN</button>
+    <div id="loginSection" class="flex items-center justify-center min-h-screen p-6">
+        <div class="bg-white p-12 rounded-[50px] shadow-2xl w-full max-w-md text-center border-t-[12px] border-slate-900">
+            <img src="logo.png" alt="Logo" class="h-20 mx-auto mb-8">
+            <h1 class="text-3xl font-black text-slate-800 mb-1 uppercase italic tracking-tighter">MCC Portal</h1>
+            <p class="text-slate-400 text-[10px] mb-10 tracking-[0.2em] uppercase font-bold">Cloud Sync Intelligence</p>
+            <input type="text" id="user" placeholder="Username" class="w-full p-5 mb-4 border-2 rounded-2xl outline-none focus:border-blue-500 bg-slate-50 font-bold transition-all">
+            <input type="password" id="pass" placeholder="Password" class="w-full p-5 mb-8 border-2 rounded-2xl outline-none focus:border-blue-500 bg-slate-50 font-bold transition-all">
+            <button onclick="handleLogin()" class="w-full bg-slate-900 text-white p-5 rounded-2xl font-black hover:bg-blue-600 transition-all shadow-lg active:scale-95">ACCESS SYSTEM</button>
         </div>
     </div>
 
     <div id="mainApp" class="hidden">
-        <nav class="bg-white p-4 border-b flex justify-between items-center sticky top-0 z-50">
-            <img src="logo.png" class="h-8">
-            <div class="flex items-center gap-6">
-                <div class="flex gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                    <div class="text-center"><p>Local</p><p class="clock-local text-slate-800 text-xs"></p></div>
-                    <div class="text-center"><p>New York</p><p class="clock-est text-slate-800 text-xs"></p></div>
-                </div>
-                <span id="userBadge" class="bg-slate-900 text-white px-4 py-1 rounded-full text-[10px] font-bold"></span>
-                <button onclick="location.reload()" class="text-slate-300 hover:text-red-500"><i class="fas fa-sign-out-alt"></i></button>
+        <nav class="bg-white p-5 border-b flex justify-between items-center sticky top-0 z-50">
+            <img src="logo.png" class="h-10">
+            <div class="flex items-center gap-4">
+                <span id="userBadge" class="bg-slate-100 px-4 py-1.5 rounded-full text-[11px] font-black text-slate-500 uppercase tracking-tight"></span>
+                <button onclick="location.reload()" class="text-slate-300 hover:text-red-500 transition-colors"><i class="fas fa-power-off"></i></button>
             </div>
         </nav>
 
         <div class="max-w-4xl mx-auto p-8">
-            <div class="bg-white p-12 rounded-[60px] shadow-sm border border-slate-100 text-center">
-                <h2 class="text-[10px] font-black text-slate-300 mb-8 uppercase tracking-[0.5em]">Name Verification Scrub</h2>
-                
-                <div class="relative mb-10">
-                    <input type="text" id="globalSearch" onkeyup="runGlobalSearch()" placeholder="Type or paste full name..." 
-                        class="w-full p-6 text-2xl border-4 border-slate-100 rounded-3xl text-center font-bold bg-slate-50 focus:border-blue-500 outline-none transition-all">
-                </div>
-
-                <div class="grid grid-cols-2 gap-4 mb-8">
-                    <div class="bg-slate-50 p-4 rounded-2xl border border-dashed">
-                        <p class="text-[9px] font-bold text-slate-400 uppercase mb-2">First Name Result</p>
-                        <input type="text" id="displayFirst" readonly class="w-full text-center font-black text-slate-700 bg-transparent outline-none uppercase">
-                    </div>
-                    <div class="bg-slate-50 p-4 rounded-2xl border border-dashed">
-                        <p class="text-[9px] font-bold text-slate-400 uppercase mb-2">Last Name Result</p>
-                        <input type="text" id="displayLast" readonly class="w-full text-center font-black text-slate-700 bg-transparent outline-none uppercase">
-                    </div>
+            <div class="bg-white p-12 rounded-[45px] border shadow-sm text-center">
+                <h2 class="text-2xl font-black text-slate-800 mb-8 uppercase tracking-widest italic">Verification Scrub</h2>
+                <div class="relative max-w-2xl mx-auto">
+                    <input type="text" id="searchBox" onkeyup="searchDatabase()" placeholder="Type or Paste Full Name..." 
+                        class="w-full p-6 text-3xl border-4 border-slate-100 rounded-3xl text-center font-bold bg-[#fcfdff] focus:border-blue-500 focus:bg-white outline-none text-slate-700 transition-all">
                 </div>
                 
-                <div id="statusBox" class="hidden">
+                <div id="statusBox" class="hidden animate-bounce mt-10">
                     <i id="statusIcon"></i>
-                    <h3 id="statusTitle" class="text-4xl font-black italic tracking-tighter"></h3>
-                    <p id="statusSub" class="text-xs font-bold uppercase opacity-60 mt-2"></p>
+                    <h3 id="statusTitle" class="text-5xl font-black italic tracking-tighter"></h3>
                 </div>
             </div>
 
             <div id="adminControls" class="hidden mt-10 space-y-8">
-                <div class="grid grid-cols-2 gap-6">
-                    <div class="bg-slate-900 p-8 rounded-[40px] text-white">
-                        <p class="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Master Cloud Sync</p>
-                        <h4 id="countDisplay" class="text-5xl font-black italic">...</h4>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div class="bg-slate-900 p-8 rounded-[40px] text-white shadow-xl">
+                        <p class="text-slate-400 text-[11px] font-black uppercase tracking-widest">Master Cloud Records</p>
+                        <h4 id="countDisplay" class="text-5xl font-black italic mt-1">...</h4>
                     </div>
-                    <div class="bg-slate-900 p-8 rounded-[40px] flex flex-col justify-center">
-                        <button onclick="purgeDatabase()" class="bg-red-500 hover:bg-red-600 text-white p-4 rounded-2xl font-black text-xs uppercase shadow-lg transition-all active:scale-95">
-                            <i class="fas fa-trash-alt mr-2"></i> Purge Synced Data
-                        </button>
+                    <div class="bg-slate-900 p-8 rounded-[40px] text-white shadow-xl flex flex-col justify-center">
+                        <p class="text-slate-400 text-[11px] font-black uppercase tracking-widest">Connection</p>
+                        <h4 class="text-sm font-black text-green-400 flex items-center gap-3 mt-4">
+                            <span class="h-3 w-3 rounded-full bg-green-500 animate-pulse shadow-[0_0_10px_#22c55e]"></span> 
+                            FIREBASE LIVE SYNC
+                        </h4>
                     </div>
                 </div>
 
-                <div class="bg-white rounded-[40px] border p-8 shadow-sm">
-                    <h3 class="text-slate-300 font-black text-[10px] uppercase mb-6 tracking-widest">Live Activity Feed</h3>
-                    <div id="historyLogs"></div>
+                <div class="bg-white rounded-[40px] border shadow-sm p-8">
+                    <p class="text-[11px] font-black text-slate-300 mb-6 uppercase tracking-widest">Recent Activity Stream</p>
+                    <div id="historyLogs" class="space-y-1"></div>
                 </div>
 
-                <div class="bg-slate-900 p-10 rounded-[50px] text-white">
-                    <textarea id="bulkInput" placeholder="Paste names to sync..." class="w-full h-32 p-6 bg-slate-800 border-0 rounded-3xl mb-6 outline-none text-slate-300 font-mono"></textarea>
-                    <button onclick="uploadToCloud()" class="w-full bg-blue-600 p-5 rounded-2xl font-black text-lg hover:bg-blue-500 shadow-xl transition-all">SYNC TO MASTER LIST</button>
+                <div class="bg-slate-900 p-10 rounded-[50px] text-white shadow-2xl">
+                    <div class="flex justify-between items-center mb-6">
+                        <p class="text-slate-400 text-xs font-bold uppercase tracking-widest italic">Database Bulk Upload</p>
+                        <span class="text-[10px] bg-slate-800 px-3 py-1 rounded-full text-slate-500 font-mono">Firestore v10.7</span>
+                    </div>
+                    <textarea id="bulkInput" placeholder="Paste names here (one per line)..." 
+                        class="w-full h-56 p-6 bg-slate-800 border-none rounded-3xl mb-6 outline-none text-slate-200 font-mono focus:ring-2 focus:ring-blue-500 transition-all"></textarea>
+                    <button onclick="uploadToCloud()" class="w-full bg-blue-600 p-6 rounded-2xl font-black text-xl hover:bg-blue-500 transition-all shadow-xl active:scale-95 uppercase italic">Push to Master List</button>
                 </div>
             </div>
         </div>
     </div>
+
+    <script>
+        // Fallback to ensure standard icons load
+        window.addEventListener('load', () => {
+            console.log("Portal Initialized");
+        });
+    </script>
 </body>
 </html>
